@@ -108,7 +108,16 @@ export const ResourcesPage: React.FC = () => {
       )}
 
       {/* Roadmap Modules Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {filtered.length === 0 ? (
+        <div className="p-12 text-center rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821]">
+          <p className="font-mono text-sm text-slate-600 dark:text-slate-400">
+            {resources.length === 0
+              ? 'No learning roadmap modules have been published yet.'
+              : 'No learning modules found for this track.'}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filtered.map((res, index) => {
           const isLocked = res.access === 'full' && !canViewFull;
           const isCompleted = completedResourceIds.includes(res.id);
@@ -200,6 +209,7 @@ export const ResourcesPage: React.FC = () => {
           );
         })}
       </div>
+      )}
     </div>
   );
 };

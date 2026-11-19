@@ -1,4 +1,12 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   User as FirebaseUser,
   createUserWithEmailAndPassword,
@@ -6,7 +14,6 @@ import {
   reload,
   sendEmailVerification,
   signInWithEmailAndPassword,
-  signInWithPopup,
   signOut,
   updateProfile,
 } from 'firebase/auth';
@@ -28,21 +35,14 @@ import {
   CampusEvent,
   EventRegistration,
   GalleryPhoto,
-  INITIAL_ANNOUNCEMENTS,
-  INITIAL_EVENTS,
-  INITIAL_GALLERY,
-  INITIAL_JOIN_REQUESTS,
-  INITIAL_LEADERBOARD,
-  INITIAL_REGISTRATIONS,
-  INITIAL_RESOURCES,
   INITIAL_SITE_SETTINGS,
-  INITIAL_USERS,
   JoinRequest,
   LeaderboardEntry,
   LearningResource,
   PermissionKey,
   ROLE_META,
   SiteSettings,
+  TeamMember,
   UserAccount,
   UserRole,
   getDashboardPath,
@@ -53,7 +53,6 @@ import {
   OperationType,
   auth,
   db,
-  googleProvider,
   handleFirestoreError,
 } from '../lib/firebase';
 
@@ -104,22 +103,19 @@ interface AppContextValue {
   firebaseUser: FirebaseUser | null;
   needsEmailVerification: boolean;
   unverifiedEmail: string | null;
-  isDemoPreview: boolean;
   currentUser: UserAccount | null;
   currentRole: UserRole;
   can: (permission: PermissionKey) => boolean;
   login: (email: string, password: string) => Promise<AuthActionResult>;
-  loginWithGoogle: () => Promise<AuthActionResult>;
   signup: (payload: SignupPayload) => Promise<AuthActionResult>;
   resendVerificationEmail: () => Promise<{ ok: boolean; error?: string }>;
   refreshEmailVerification: () => Promise<AuthActionResult>;
   logout: () => Promise<void>;
-  switchDemoRole: (role: UserRole) => void;
-  exitDemoPreview: () => void;
 
-  // Data Collections
+  // Live Firestore Data Collections
   siteSettings: SiteSettings;
   users: UserAccount[];
+  teamMembers: TeamMember[];
   events: CampusEvent[];
   announcements: Announcement[];
   leaderboard: LeaderboardEntry[];
@@ -128,8 +124,6 @@ interface AppContextValue {
   registrations: EventRegistration[];
   joinRequests: JoinRequest[];
   completedResourceIds: string[];
-  isFirestoreSeeded: boolean;
-  seedDatabaseFromStarter: () => Promise<void>;
 
   // Actions — Events
   createEvent: (
@@ -193,6 +187,11 @@ const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 const clampStr = (val: string, max: number) => val.trim().slice(0, max);
 
+const ensureMinLen = (val: string, fallback: string, minLen: number, maxLen: number) => {
+  const cleaned = clampStr(val, maxLen);
+  return cleaned.length >= minLen ? cleaned : fallback;
+};
+
 const sanitizeId = (raw: string) =>
   raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128) || `id_${Date.now()}`;
 
@@ -206,6 +205,54 @@ export function isAllowedCollegeEmail(email?: string | null): boolean {
 }
 
 const PENDING_META_PREFIX = 'hrcc_pending_signup_';
+
+// Legacy demo document IDs & emails removed automatically when Campus Lead connects
+const LEGACY_DEMO_USER_IDS = new Set([
+  'usr_lead_01',
+  'usr_crew_01',
+  'usr_student_01',
+  'usr_crew_02',
+  'usr_student_02',
+]);
+
+const LEGACY_DEMO_EMAILS = new Set([
+  'lead@paavai.edu.in',
+  'crew@paavai.edu.in',
+  'student@paavai.edu.in',
+  'praveen.crew@paavai.edu.in',
+  'nivetha.m@paavai.edu.in',
+]);
+
+const LEGACY_DEMO_TEAM_IDS = new Set([
+  ...LEGACY_DEMO_USER_IDS,
+  'team_01',
+  'team_02',
+  'team_03',
+  'team_04',
+  'team_05',
+]);
+
+const LEGACY_DEMO_EVENT_IDS = new Set([
+  'evt_01',
+  'evt_02',
+  'evt_03',
+  'evt_04',
+  'evt_pending_01',
+]);
+
+const LEGACY_DEMO_ANNOUNCEMENT_IDS = new Set(['ann_01', 'ann_02', 'ann_pending_01']);
+
+const LEGACY_DEMO_LEADERBOARD_IDS = new Set(
+  Array.from({ length: 16 }, (_, idx) => `lb_${String(idx + 1).padStart(2, '0')}`)
+);
+
+const LEGACY_DEMO_RESOURCE_IDS = new Set(
+  Array.from({ length: 12 }, (_, idx) => `res_${String(idx + 1).padStart(2, '0')}`)
+);
+
+const LEGACY_DEMO_GALLERY_IDS = new Set(['gal_01', 'gal_02', 'gal_03', 'gal_04']);
+const LEGACY_DEMO_REGISTRATION_IDS = new Set(['reg_01', 'reg_02', 'reg_03']);
+const LEGACY_DEMO_JOIN_REQUEST_IDS = new Set(['req_01', 'req_02']);
 
 function readPendingMeta(uid: string): PendingSignupMeta | null {
   try {
@@ -233,6 +280,28 @@ function clearPendingMeta(uid: string): void {
   }
 }
 
+function buildTeamMemberPayload(input: {
+  uid: string;
+  name: string;
+  role: 'lead' | 'crew';
+  department: string;
+  year: string;
+  bio: string;
+  hackerRankHandle: string;
+}) {
+  return {
+    uid: sanitizeId(input.uid),
+    name: ensureMinLen(input.name, 'Paavai Coder', 2, 100),
+    role: input.role,
+    designation: input.role === 'lead' ? 'HackerRank Campus Lead' : 'Campus Crew Member',
+    department: ensureMinLen(input.department, 'CSE', 2, 40),
+    year: ensureMinLen(input.year, '1st Year', 2, 20),
+    bio: clampStr(input.bio || '', 500),
+    hackerRankHandle: clampStr(input.hackerRankHandle || '', 60),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
@@ -248,45 +317,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [firebaseProfile, setFirebaseProfile] = useState<UserAccount | null>(null);
 
-  // Demo preview override (allows previewing all 4 roles via Navbar dropdown)
-  const [demoRoleOverride, setDemoRoleOverride] = useState<UserRole | null>(null);
-  const [demoUsers, setDemoUsers] = useState<UserAccount[]>(INITIAL_USERS);
-
-  // Live Firestore collections (backed by fallback sample state until seeded)
+  // Live Firestore collections (zero demo/mock fallback data)
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(INITIAL_SITE_SETTINGS);
   const [liveUsers, setLiveUsers] = useState<UserAccount[]>([]);
-  const [liveEvents, setLiveEvents] = useState<CampusEvent[]>([]);
-  const [liveAnnouncements, setLiveAnnouncements] = useState<Announcement[]>([]);
-  const [liveLeaderboard, setLiveLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [liveResources, setLiveResources] = useState<LearningResource[]>([]);
-  const [liveGallery, setLiveGallery] = useState<GalleryPhoto[]>([]);
-  const [liveRegistrations, setLiveRegistrations] = useState<EventRegistration[]>([]);
-  const [liveJoinRequests, setLiveJoinRequests] = useState<JoinRequest[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [events, setEvents] = useState<CampusEvent[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [resources, setResources] = useState<LearningResource[]>([]);
+  const [gallery, setGallery] = useState<GalleryPhoto[]>([]);
+  const [registrations, setRegistrations] = useState<EventRegistration[]>([]);
+  const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [completedResourceIds, setCompletedResourceIds] = useState<string[]>([]);
 
-  // Track whether Firestore has been populated with initial records
-  const [hasLiveEvents, setHasLiveEvents] = useState(false);
-  const [hasLiveAnnouncements, setHasLiveAnnouncements] = useState(false);
-  const [hasLiveLeaderboard, setHasLiveLeaderboard] = useState(false);
-  const [hasLiveResources, setHasLiveResources] = useState(false);
-  const [hasLiveGallery, setHasLiveGallery] = useState(false);
-
-  // Local fallback collections when in demo preview or unseeded database
-  const [fallbackEvents, setFallbackEvents] = useState<CampusEvent[]>(INITIAL_EVENTS);
-  const [fallbackAnnouncements, setFallbackAnnouncements] =
-    useState<Announcement[]>(INITIAL_ANNOUNCEMENTS);
-  const [fallbackLeaderboard, setFallbackLeaderboard] =
-    useState<LeaderboardEntry[]>(INITIAL_LEADERBOARD);
-  const [fallbackResources, setFallbackResources] =
-    useState<LearningResource[]>(INITIAL_RESOURCES);
-  const [fallbackGallery, setFallbackGallery] = useState<GalleryPhoto[]>(INITIAL_GALLERY);
-  const [fallbackRegistrations, setFallbackRegistrations] =
-    useState<EventRegistration[]>(INITIAL_REGISTRATIONS);
-  const [fallbackJoinRequests, setFallbackJoinRequests] =
-    useState<JoinRequest[]>(INITIAL_JOIN_REQUESTS);
-
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [autoSeedTriggered, setAutoSeedTriggered] = useState(false);
+  const cleanupRanForUidRef = useRef<string | null>(null);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -319,7 +364,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Helper: ensure users/{uid} exists on first verified login & return role
+  // Helper: ensure users/{uid} exists on first verified login & sync team_members for lead/crew
   const ensureUserProfile = useCallback(
     async (fbUser: FirebaseUser): Promise<Exclude<UserRole, 'outsider'>> => {
       const userPath = `users/${fbUser.uid}`;
@@ -329,8 +374,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (snap.exists()) {
           const data = snap.data();
           clearPendingMeta(fbUser.uid);
-          const role = data.role as Exclude<UserRole, 'outsider'>;
-          return role === 'lead' || role === 'crew' ? role : 'member';
+          if (data.emailVerified === false) {
+            await updateDoc(userRef, {
+              emailVerified: true,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+          const rawRole = data.role as Exclude<UserRole, 'outsider'>;
+          const resolvedRole: Exclude<UserRole, 'outsider'> =
+            rawRole === 'lead' || rawRole === 'crew' ? rawRole : 'member';
+
+          if (resolvedRole === 'lead' || resolvedRole === 'crew') {
+            await setDoc(
+              doc(db, 'team_members', fbUser.uid),
+              buildTeamMemberPayload({
+                uid: fbUser.uid,
+                name: String(data.name || fbUser.displayName || 'Paavai Coder'),
+                role: resolvedRole,
+                department: String(data.department || 'CSE'),
+                year: String(data.year || '1st Year'),
+                bio: String(data.bio || ''),
+                hackerRankHandle: String(data.hackerRankHandle || ''),
+              })
+            );
+          }
+
+          return resolvedRole;
         }
 
         const isBootAdmin =
@@ -338,18 +407,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           fbUser.emailVerified;
         const pending = readPendingMeta(fbUser.uid);
         const assignedRole: Exclude<UserRole, 'outsider'> = isBootAdmin ? 'lead' : 'member';
+        const nowISO = new Date().toISOString();
 
         const newProfileDoc = {
           uid: fbUser.uid,
           email: clampStr((fbUser.email || '').toLowerCase(), 160),
-          name: clampStr(pending?.name || fbUser.displayName || 'Paavai Student', 100),
+          name: ensureMinLen(pending?.name || fbUser.displayName || 'Paavai Student', 'Paavai Student', 2, 100),
           regNo: clampStr(
             (pending?.regNo || (isBootAdmin ? '622123104012' : 'PEC-MEMBER')).toUpperCase(),
             20
           ),
-          department: clampStr(pending?.department || 'CSE', 40),
-          year: clampStr(pending?.year || (isBootAdmin ? '4th Year' : '1st Year'), 20),
+          department: ensureMinLen(pending?.department || 'CSE', 'CSE', 2, 40),
+          year: ensureMinLen(pending?.year || (isBootAdmin ? '4th Year' : '1st Year'), '1st Year', 2, 20),
           role: assignedRole,
+          emailVerified: true,
           phone: clampStr(pending?.phone || '', 20),
           hackerRankHandle: clampStr(
             pending?.hackerRankHandle ||
@@ -360,11 +431,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ? 'HackerRank Campus Lead at Paavai Engineering College.'
             : 'Student Community Member at Paavai Engineering College.',
           skills: ['Problem Solving'],
-          joinedAt: new Date().toISOString().slice(0, 10),
-          updatedAt: new Date().toISOString(),
+          joinedAt: nowISO.slice(0, 10),
+          createdAt: nowISO,
+          updatedAt: nowISO,
         };
 
         await setDoc(userRef, newProfileDoc);
+        if (assignedRole === 'lead') {
+          await setDoc(
+            doc(db, 'team_members', fbUser.uid),
+            buildTeamMemberPayload({
+              uid: fbUser.uid,
+              name: newProfileDoc.name,
+              role: 'lead',
+              department: newProfileDoc.department,
+              year: newProfileDoc.year,
+              bio: newProfileDoc.bio,
+              hackerRankHandle: newProfileDoc.hackerRankHandle,
+            })
+          );
+        }
         clearPendingMeta(fbUser.uid);
         return assignedRole;
       } catch (err) {
@@ -383,6 +469,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!fbUser) {
         setFirebaseProfile(null);
         setCompletedResourceIds([]);
+        cleanupRanForUidRef.current = null;
       }
     });
     return () => unsub();
@@ -423,8 +510,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             id: snap.id,
             name: String(data.name || firebaseUser.displayName || 'Paavai Coder'),
             email: String(data.email || firebaseUser.email || ''),
-            password: '',
             role: role === 'lead' || role === 'crew' ? role : 'member',
+            emailVerified: data.emailVerified !== false,
             regNo: String(data.regNo || data.registerNumber || 'PEC-MEMBER'),
             department: String(data.department || 'CSE'),
             year: String(data.year || '1st Year'),
@@ -433,9 +520,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             bio: String(data.bio || ''),
             skills: Array.isArray(data.skills) ? data.skills.map(String) : [],
             joinedAt: String(data.joinedAt || new Date().toISOString().slice(0, 10)),
+            createdAt: data.createdAt ? String(data.createdAt) : undefined,
           });
         } else {
-          // Provision user profile document on first verified login
           await ensureUserProfile(firebaseUser);
         }
       },
@@ -469,9 +556,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubProgress();
     };
   }, [firebaseUser, isVerifiedAllowedUser, ensureUserProfile]);
-
-  // Derived real Firebase role vs Demo preview role
-  const isDemoPreview = demoRoleOverride !== null;
 
   const isRealCampusLead = Boolean(
     isVerifiedAllowedUser &&
@@ -510,15 +594,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (error) => handleFirestoreError(error, OperationType.GET, 'site_settings/main')
     );
 
-    // 2. Events (Query all if real Crew/Lead; otherwise strictly approved events)
+    // 2. Public Team Roster (Lead & Crew synced from /users)
+    const unsubTeam = onSnapshot(
+      collection(db, 'team_members'),
+      (snap) => {
+        setTeamMembers(
+          snap.docs.map((d) => {
+            const x = d.data();
+            return {
+              id: d.id,
+              uid: String(x.uid || d.id),
+              name: String(x.name || ''),
+              role: x.role === 'lead' ? 'lead' : 'crew',
+              designation: String(x.designation || 'Campus Crew Member'),
+              department: String(x.department || ''),
+              year: String(x.year || ''),
+              bio: String(x.bio || ''),
+              hackerRankHandle: String(x.hackerRankHandle || ''),
+              updatedAt: x.updatedAt ? String(x.updatedAt) : undefined,
+            };
+          })
+        );
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'team_members')
+    );
+
+    // 3. Events (Crew/Lead see all; others strictly approved)
     const eventsQuery = isRealCrewOrLead
       ? collection(db, 'events')
       : query(collection(db, 'events'), where('status', '==', 'approved'));
     const unsubEvents = onSnapshot(
       eventsQuery,
       (snap) => {
-        setHasLiveEvents(!snap.empty);
-        setLiveEvents(
+        setEvents(
           snap.docs.map((d) => {
             const x = d.data();
             return {
@@ -541,15 +649,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (error) => handleFirestoreError(error, OperationType.LIST, 'events')
     );
 
-    // 3. Announcements
+    // 4. Announcements
     const annQuery = isRealCrewOrLead
       ? collection(db, 'announcements')
       : query(collection(db, 'announcements'), where('status', '==', 'approved'));
     const unsubAnnouncements = onSnapshot(
       annQuery,
       (snap) => {
-        setHasLiveAnnouncements(!snap.empty);
-        setLiveAnnouncements(
+        setAnnouncements(
           snap.docs.map((d) => {
             const x = d.data();
             return {
@@ -567,12 +674,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (error) => handleFirestoreError(error, OperationType.LIST, 'announcements')
     );
 
-    // 4. Leaderboard
+    // 5. Leaderboard
     const unsubLeaderboard = onSnapshot(
       collection(db, 'leaderboard'),
       (snap) => {
-        setHasLiveLeaderboard(!snap.empty);
-        setLiveLeaderboard(
+        setLeaderboard(
           snap.docs.map((d) => {
             const x = d.data();
             return {
@@ -591,15 +697,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (error) => handleFirestoreError(error, OperationType.LIST, 'leaderboard')
     );
 
-    // 5. Resources (Guests & unverified users query only `access == 'basic'`)
+    // 6. Resources (Guests & unverified users query only `access == 'basic'`)
     const resourcesQuery = isVerifiedAllowedUser
       ? collection(db, 'resources')
       : query(collection(db, 'resources'), where('access', '==', 'basic'));
     const unsubResources = onSnapshot(
       resourcesQuery,
       (snap) => {
-        setHasLiveResources(!snap.empty);
-        setLiveResources(
+        setResources(
           snap.docs.map((d) => {
             const x = d.data();
             return {
@@ -620,12 +725,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (error) => handleFirestoreError(error, OperationType.LIST, 'resources')
     );
 
-    // 6. Gallery
+    // 7. Gallery
     const unsubGallery = onSnapshot(
       collection(db, 'gallery'),
       (snap) => {
-        setHasLiveGallery(!snap.empty);
-        setLiveGallery(
+        setGallery(
           snap.docs.map((d) => {
             const x = d.data();
             return {
@@ -645,6 +749,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return () => {
       unsubSettings();
+      unsubTeam();
       unsubEvents();
       unsubAnnouncements();
       unsubLeaderboard();
@@ -656,7 +761,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Registrations listener (Crew/Lead see all; verified Member sees own)
   useEffect(() => {
     if (!authReady || !firebaseUser || !isVerifiedAllowedUser) {
-      setLiveRegistrations([]);
+      setRegistrations([]);
       return;
     }
 
@@ -667,7 +772,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubRegs = onSnapshot(
       regQuery,
       (snap) => {
-        setLiveRegistrations(
+        setRegistrations(
           snap.docs.map((d) => {
             const x = d.data();
             return {
@@ -694,7 +799,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     if (!authReady || !firebaseUser || !isVerifiedAllowedUser || !isRealCampusLead) {
       setLiveUsers([]);
-      setLiveJoinRequests([]);
+      setJoinRequests([]);
       return;
     }
 
@@ -709,8 +814,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               id: d.id,
               name: String(x.name || ''),
               email: String(x.email || ''),
-              password: '',
               role: role === 'lead' || role === 'crew' ? role : 'member',
+              emailVerified: x.emailVerified !== false,
               regNo: String(x.regNo || x.registerNumber || ''),
               department: String(x.department || ''),
               year: String(x.year || ''),
@@ -719,6 +824,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               bio: String(x.bio || ''),
               skills: Array.isArray(x.skills) ? x.skills.map(String) : [],
               joinedAt: String(x.joinedAt || ''),
+              createdAt: x.createdAt ? String(x.createdAt) : undefined,
             };
           })
         );
@@ -729,7 +835,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubJoinReqs = onSnapshot(
       collection(db, 'join_requests'),
       (snap) => {
-        setLiveJoinRequests(
+        setJoinRequests(
           snap.docs.map((d) => {
             const x = d.data();
             return {
@@ -756,195 +862,191 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [authReady, firebaseUser, isVerifiedAllowedUser, isRealCampusLead]);
 
-  // Seed starter data into Firestore when Campus Lead logs in to an empty database
-  const seedDatabaseFromStarter = useCallback(async () => {
-    if (!firebaseUser || !isRealCampusLead) {
-      addToast('Campus Lead sign-in required', 'Sign in as Campus Lead to seed Firestore.', 'error');
-      return;
-    }
-    try {
-      const batch = writeBatch(db);
-
-      batch.set(doc(db, 'site_settings', 'main'), {
-        ...INITIAL_SITE_SETTINGS,
-        updatedAt: new Date().toISOString(),
-      });
-
-      INITIAL_EVENTS.forEach((ev) => {
-        batch.set(doc(db, 'events', ev.id), {
-          title: clampStr(ev.title, 140),
-          category: ev.category,
-          dateISO: ev.dateISO,
-          venue: clampStr(ev.venue, 160),
-          description: clampStr(ev.description, 1000),
-          membersOnly: ev.membersOnly,
-          capacity: ev.capacity,
-          status: ev.status,
-          createdByUid: firebaseUser.uid,
-          createdByName: clampStr(ev.createdByName, 100),
-          createdByRole: ev.createdByRole,
-          bannerImage: clampStr(ev.bannerImage, 500),
-          updatedAt: new Date().toISOString(),
-        });
-      });
-
-      INITIAL_ANNOUNCEMENTS.forEach((ann) => {
-        batch.set(doc(db, 'announcements', ann.id), {
-          title: clampStr(ann.title, 140),
-          message: clampStr(ann.message, 1000),
-          date: ann.date,
-          priority: ann.priority,
-          status: ann.status,
-          createdByUid: firebaseUser.uid,
-          createdByName: clampStr(ann.createdByName, 100),
-          updatedAt: new Date().toISOString(),
-        });
-      });
-
-      INITIAL_LEADERBOARD.forEach((entry) => {
-        batch.set(doc(db, 'leaderboard', entry.id), {
-          name: clampStr(entry.name, 100),
-          registerNumber: clampStr(entry.registerNumber, 20),
-          department: clampStr(entry.department, 40),
-          year: clampStr(entry.year, 20),
-          score: entry.score,
-          problemsSolved: entry.problemsSolved,
-          hackerRankHandle: clampStr(entry.hackerRankHandle, 60),
-          updatedAt: new Date().toISOString(),
-        });
-      });
-
-      INITIAL_RESOURCES.forEach((res) => {
-        batch.set(doc(db, 'resources', res.id), {
-          title: clampStr(res.title, 140),
-          track: res.track,
-          level: res.level,
-          access: res.access,
-          estimatedHours: res.estimatedHours,
-          problemCount: res.problemCount,
-          summary: clampStr(res.summary, 600),
-          url: clampStr(res.url, 500),
-          topics: res.topics.slice(0, 10),
-        });
-      });
-
-      INITIAL_GALLERY.forEach((photo) => {
-        batch.set(doc(db, 'gallery', photo.id), {
-          title: clampStr(photo.title, 140),
-          category: photo.category,
-          date: photo.date,
-          caption: clampStr(photo.caption, 500),
-          imageUrl: clampStr(photo.imageUrl, 500),
-          uploadedByUid: firebaseUser.uid,
-          uploadedBy: clampStr(photo.uploadedBy, 100),
-        });
-      });
-
-      await batch.commit();
-      addToast(
-        'Firestore database seeded',
-        'Starter events, leaderboard, resources, gallery, and settings are now persisted in Firestore.',
-        'success'
-      );
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'batch_seed');
-    }
-  }, [firebaseUser, isRealCampusLead, addToast]);
-
-  // Auto-seed once if Campus Lead signs in and Firestore `events` is empty
+  // Once-per-session Lead cleanup: purge any leftover demo records in Firestore & sync team_members
   useEffect(() => {
-    if (!authReady || !firebaseUser || !isRealCampusLead || autoSeedTriggered) return;
+    if (!authReady || !firebaseUser || !isRealCampusLead) return;
+    if (cleanupRanForUidRef.current === firebaseUser.uid) return;
+    cleanupRanForUidRef.current = firebaseUser.uid;
+
     let cancelled = false;
+
     (async () => {
       try {
-        const snap = await getDocs(collection(db, 'events'));
-        if (!cancelled && snap.empty) {
-          setAutoSeedTriggered(true);
-          await seedDatabaseFromStarter();
-        } else {
-          setAutoSeedTriggered(true);
+        const [
+          usersSnap,
+          teamSnap,
+          regsSnap,
+          joinSnap,
+          lbSnap,
+          eventsSnap,
+          annSnap,
+          galSnap,
+          resSnap,
+        ] = await Promise.all([
+          getDocs(collection(db, 'users')),
+          getDocs(collection(db, 'team_members')),
+          getDocs(collection(db, 'registrations')),
+          getDocs(collection(db, 'join_requests')),
+          getDocs(collection(db, 'leaderboard')),
+          getDocs(collection(db, 'events')),
+          getDocs(collection(db, 'announcements')),
+          getDocs(collection(db, 'gallery')),
+          getDocs(collection(db, 'resources')),
+        ]);
+
+        if (cancelled) return;
+
+        const ops: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
+        const realTeamMap = new Map<
+          string,
+          {
+            uid: string;
+            name: string;
+            role: 'lead' | 'crew';
+            department: string;
+            year: string;
+            bio: string;
+            hackerRankHandle: string;
+          }
+        >();
+
+        usersSnap.docs.forEach((d) => {
+          const x = d.data();
+          const email = String(x.email || '').trim().toLowerCase();
+          const isDemoUser =
+            LEGACY_DEMO_USER_IDS.has(d.id) || LEGACY_DEMO_EMAILS.has(email);
+
+          if (isDemoUser && d.id !== firebaseUser.uid) {
+            ops.push((b) => b.delete(d.ref));
+            return;
+          }
+
+          const role = x.role as Exclude<UserRole, 'outsider'>;
+          if (role === 'lead' || role === 'crew') {
+            realTeamMap.set(d.id, {
+              uid: d.id,
+              name: String(x.name || 'Paavai Coder'),
+              role,
+              department: String(x.department || 'CSE'),
+              year: String(x.year || '1st Year'),
+              bio: String(x.bio || ''),
+              hackerRankHandle: String(x.hackerRankHandle || ''),
+            });
+          }
+        });
+
+        // Remove stale/demo team_members docs
+        teamSnap.docs.forEach((d) => {
+          if (LEGACY_DEMO_TEAM_IDS.has(d.id) || !realTeamMap.has(d.id)) {
+            ops.push((b) => b.delete(d.ref));
+          }
+        });
+
+        // Upsert active real Lead & Crew members into team_members
+        realTeamMap.forEach((member, uid) => {
+          const existingDoc = teamSnap.docs.find((t) => t.id === uid);
+          const existingData = existingDoc?.data();
+          const needsSync =
+            !existingDoc ||
+            existingData?.name !== ensureMinLen(member.name, 'Paavai Coder', 2, 100) ||
+            existingData?.role !== member.role ||
+            existingData?.department !== ensureMinLen(member.department, 'CSE', 2, 40) ||
+            existingData?.year !== ensureMinLen(member.year, '1st Year', 2, 20) ||
+            existingData?.bio !== clampStr(member.bio || '', 500) ||
+            existingData?.hackerRankHandle !== clampStr(member.hackerRankHandle || '', 60);
+
+          if (needsSync) {
+            ops.push((b) =>
+              b.set(doc(db, 'team_members', uid), buildTeamMemberPayload(member))
+            );
+          }
+        });
+
+        regsSnap.docs.forEach((d) => {
+          const x = d.data();
+          const userId = String(x.userId || '');
+          const userEmail = String(x.userEmail || '').trim().toLowerCase();
+          if (
+            LEGACY_DEMO_REGISTRATION_IDS.has(d.id) ||
+            LEGACY_DEMO_USER_IDS.has(userId) ||
+            LEGACY_DEMO_EMAILS.has(userEmail)
+          ) {
+            ops.push((b) => b.delete(d.ref));
+          }
+        });
+
+        joinSnap.docs.forEach((d) => {
+          if (LEGACY_DEMO_JOIN_REQUEST_IDS.has(d.id)) {
+            ops.push((b) => b.delete(d.ref));
+          }
+        });
+
+        lbSnap.docs.forEach((d) => {
+          if (LEGACY_DEMO_LEADERBOARD_IDS.has(d.id)) {
+            ops.push((b) => b.delete(d.ref));
+          }
+        });
+
+        eventsSnap.docs.forEach((d) => {
+          if (LEGACY_DEMO_EVENT_IDS.has(d.id)) {
+            ops.push((b) => b.delete(d.ref));
+          }
+        });
+
+        annSnap.docs.forEach((d) => {
+          if (LEGACY_DEMO_ANNOUNCEMENT_IDS.has(d.id)) {
+            ops.push((b) => b.delete(d.ref));
+          }
+        });
+
+        galSnap.docs.forEach((d) => {
+          if (LEGACY_DEMO_GALLERY_IDS.has(d.id)) {
+            ops.push((b) => b.delete(d.ref));
+          }
+        });
+
+        resSnap.docs.forEach((d) => {
+          if (LEGACY_DEMO_RESOURCE_IDS.has(d.id)) {
+            ops.push((b) => b.delete(d.ref));
+          }
+        });
+
+        // Execute in chunks of 400 operations
+        for (let i = 0; i < ops.length; i += 400) {
+          const batch = writeBatch(db);
+          ops.slice(i, i + 400).forEach((apply) => apply(batch));
+          await batch.commit();
         }
-      } catch {
-        // Ignore if rules/offline; handled by snapshot listeners
+      } catch (err) {
+        console.warn('Firestore legacy demo cleanup skipped:', err);
       }
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [authReady, firebaseUser, isRealCampusLead, autoSeedTriggered, seedDatabaseFromStarter]);
+  }, [authReady, firebaseUser, isRealCampusLead]);
 
   // ---------------- ACTIVE USER & ROLE RESOLUTION ----------------
   const currentUser = useMemo<UserAccount | null>(() => {
-    if (demoRoleOverride !== null) {
-      if (demoRoleOverride === 'outsider') return null;
-      return demoUsers.find((u) => u.role === demoRoleOverride) ?? null;
-    }
     return isVerifiedAllowedUser ? firebaseProfile : null;
-  }, [demoRoleOverride, demoUsers, firebaseProfile, isVerifiedAllowedUser]);
+  }, [firebaseProfile, isVerifiedAllowedUser]);
 
   const currentRole: UserRole = useMemo(() => {
-    if (demoRoleOverride !== null) return demoRoleOverride;
     if (!isVerifiedAllowedUser) return 'outsider';
     if (firebaseProfile) return firebaseProfile.role;
     if (firebaseUser?.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL) {
       return 'lead';
     }
     return 'member';
-  }, [demoRoleOverride, firebaseProfile, firebaseUser, isVerifiedAllowedUser]);
+  }, [firebaseProfile, firebaseUser, isVerifiedAllowedUser]);
 
   const can = useCallback(
     (permission: PermissionKey): boolean => hasPermission(currentRole, permission),
     [currentRole]
   );
 
-  // Resolved data pools
-  const isFirestoreSeeded =
-    hasLiveEvents || hasLiveLeaderboard || hasLiveResources || hasLiveGallery;
-
-  const events = isDemoPreview
-    ? fallbackEvents
-    : hasLiveEvents
-      ? liveEvents
-      : fallbackEvents.filter((e) => e.status === 'approved' || can('canAccessCrewDashboard'));
-
-  const announcements = isDemoPreview
-    ? fallbackAnnouncements
-    : hasLiveAnnouncements
-      ? liveAnnouncements
-      : fallbackAnnouncements.filter(
-          (a) => a.status === 'approved' || can('canAccessCrewDashboard')
-        );
-
-  const leaderboard = isDemoPreview
-    ? fallbackLeaderboard
-    : hasLiveLeaderboard
-      ? liveLeaderboard
-      : fallbackLeaderboard;
-
-  const resources = isDemoPreview
-    ? fallbackResources
-    : hasLiveResources
-      ? liveResources
-      : fallbackResources;
-
-  const gallery = isDemoPreview
-    ? fallbackGallery
-    : hasLiveGallery
-      ? liveGallery
-      : fallbackGallery;
-
-  const registrations = isDemoPreview
-    ? fallbackRegistrations
-    : isVerifiedAllowedUser
-      ? liveRegistrations
-      : [];
-
-  const users = isDemoPreview ? demoUsers : isRealCampusLead ? liveUsers : [];
-  const joinRequests = isDemoPreview
-    ? fallbackJoinRequests
-    : isRealCampusLead
-      ? liveJoinRequests
-      : [];
+  const users = isRealCampusLead ? liveUsers : [];
 
   // ---------------- FIREBASE AUTH ACTIONS ----------------
   const login = async (email: string, password: string): Promise<AuthActionResult> => {
@@ -956,7 +1058,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
     try {
-      setDemoRoleOverride(null);
       const cred = await signInWithEmailAndPassword(auth, trimmedEmail, password);
       await reload(cred.user);
 
@@ -978,7 +1079,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return {
           ok: false,
           error:
-            'Email/Password sign-in is not enabled in Firebase Console yet. Enable it under Authentication → Sign-in method, or use "Continue with Google".',
+            'Email/Password sign-in is not enabled in Firebase Console yet. Enable it under Authentication → Sign-in method.',
         };
       }
       if (
@@ -995,44 +1096,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const loginWithGoogle = async (): Promise<AuthActionResult> => {
-    try {
-      setDemoRoleOverride(null);
-      const cred = await signInWithPopup(auth, googleProvider);
-
-      if (!isAllowedCollegeEmail(cred.user.email)) {
-        await signOut(auth);
-        return {
-          ok: false,
-          error:
-            'Access restricted to @paavai.edu.in college Google accounts. Please sign in with your official Paavai email.',
-        };
-      }
-
-      if (!cred.user.emailVerified) {
-        await sendEmailVerification(cred.user);
-        return { ok: true, needsVerification: true };
-      }
-
-      const role = await ensureUserProfile(cred.user);
-      addToast(
-        `Signed in as ${cred.user.displayName || cred.user.email}`,
-        `Role: ${ROLE_META[role].label}`,
-        'success'
-      );
-      return { ok: true, role, redirectPath: getDashboardPath(role) };
-    } catch (err: unknown) {
-      const code = (err as { code?: string })?.code || '';
-      if (code === 'auth/popup-closed-by-user') {
-        return { ok: false, error: 'Google sign-in popup was closed.' };
-      }
-      return {
-        ok: false,
-        error: err instanceof Error ? err.message : 'Google sign-in failed.',
-      };
-    }
-  };
-
   const signup = async (payload: SignupPayload): Promise<AuthActionResult> => {
     const trimmedEmail = payload.email.trim().toLowerCase();
     if (!isAllowedCollegeEmail(trimmedEmail)) {
@@ -1042,23 +1105,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
     try {
-      setDemoRoleOverride(null);
       const cred = await createUserWithEmailAndPassword(auth, trimmedEmail, payload.password);
       await updateProfile(cred.user, { displayName: clampStr(payload.name, 100) });
 
-      savePendingMeta(cred.user.uid, {
-        name: clampStr(payload.name, 100),
-        regNo: clampStr(payload.regNo.toUpperCase(), 20),
-        department: clampStr(payload.department, 40),
-        year: clampStr(payload.year, 20),
+      const nowISO = new Date().toISOString();
+      const pendingMeta = {
+        name: ensureMinLen(payload.name, 'Paavai Student', 2, 100),
+        regNo: clampStr((payload.regNo || 'PEC-MEMBER').toUpperCase(), 20),
+        department: ensureMinLen(payload.department, 'CSE', 2, 40),
+        year: ensureMinLen(payload.year, '1st Year', 2, 20),
         phone: clampStr(payload.phone, 20),
-        hackerRankHandle: clampStr(payload.hackerRankHandle || '@paavai_coder', 60),
-      });
+        hackerRankHandle: clampStr(
+          payload.hackerRankHandle || `@${trimmedEmail.split('@')[0].slice(0, 20)}`,
+          60
+        ),
+      };
+
+      savePendingMeta(cred.user.uid, pendingMeta);
+
+      // Persist unverified user record in Firestore so scheduled cleanup can purge unverified accounts after 12h
+      try {
+        await setDoc(doc(db, 'users', cred.user.uid), {
+          uid: cred.user.uid,
+          email: clampStr(trimmedEmail, 160),
+          name: pendingMeta.name,
+          regNo: pendingMeta.regNo,
+          department: pendingMeta.department,
+          year: pendingMeta.year,
+          role: 'member',
+          emailVerified: false,
+          phone: pendingMeta.phone,
+          hackerRankHandle: pendingMeta.hackerRankHandle,
+          bio: 'Student Community Member at Paavai Engineering College.',
+          skills: ['Problem Solving'],
+          joinedAt: nowISO.slice(0, 10),
+          createdAt: nowISO,
+          updatedAt: nowISO,
+        });
+      } catch (writeErr) {
+        console.warn('Could not persist unverified user record:', writeErr);
+      }
 
       await sendEmailVerification(cred.user);
       addToast(
         'Verification email sent',
-        `Verify ${trimmedEmail} from your inbox to activate immediate member access.`,
+        `Check ${trimmedEmail} for a verification link to activate your account within 12 hours.`,
         'info'
       );
       return { ok: true, needsVerification: true };
@@ -1068,7 +1159,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return {
           ok: false,
           error:
-            'Email/Password sign-up is not enabled in Firebase Console yet. Enable it under Authentication → Sign-in method, or use "Continue with Google".',
+            'Email/Password sign-up is not enabled in Firebase Console yet. Enable it under Authentication → Sign-in method.',
         };
       }
       if (code === 'auth/email-already-in-use') {
@@ -1136,65 +1227,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const logout = async () => {
-    setDemoRoleOverride(null);
     if (firebaseUser) {
       await signOut(auth);
     }
-    addToast('Signed out', 'You are now browsing as Outsider (Guest).', 'info');
-  };
-
-  const switchDemoRole = (role: UserRole) => {
-    setDemoRoleOverride(role);
-    addToast(
-      `Demo Preview: ${ROLE_META[role].label}`,
-      'Previewing UI permissions. Sign in via Login for live Firebase persistence.',
-      'info'
-    );
-  };
-
-  const exitDemoPreview = () => {
-    setDemoRoleOverride(null);
-    addToast('Exited Demo Preview', 'Restored live Firebase Auth session.', 'info');
+    addToast('Signed out', 'You are now browsing as Guest.', 'info');
   };
 
   // ---------------- EVENTS CRUD ----------------
   const createEvent: AppContextValue['createEvent'] = async (eventInput) => {
-    if (!can('canCreateEvents') || !currentUser) return;
+    if (!can('canCreateEvents') || !currentUser || !firebaseUser) return;
     const autoApprove = can('canPublishEventsDirectly');
     const id = `evt_${Date.now()}`;
-
-    if (isDemoPreview || !firebaseUser) {
-      const created: CampusEvent = {
-        ...eventInput,
-        id,
-        status: autoApprove ? 'approved' : 'pending',
-        createdByName: currentUser.name,
-        createdByRole: currentUser.role,
-      };
-      setFallbackEvents((prev) => [created, ...prev]);
-      addToast(
-        autoApprove ? 'Event published (Demo)' : 'Event submitted for approval (Demo)',
-        created.title,
-        autoApprove ? 'success' : 'info'
-      );
-      return;
-    }
-
     const path = `events/${id}`;
     try {
       await setDoc(doc(db, 'events', id), {
-        title: clampStr(eventInput.title, 140),
+        title: ensureMinLen(eventInput.title, 'Campus Coding Event', 3, 140),
         category: eventInput.category,
         dateISO: clampStr(eventInput.dateISO, 40),
-        venue: clampStr(eventInput.venue, 160),
-        description: clampStr(eventInput.description, 1000),
+        venue: ensureMinLen(eventInput.venue, 'Paavai Campus', 2, 160),
+        description: ensureMinLen(eventInput.description, 'Campus Crew event', 5, 1000),
         membersOnly: Boolean(eventInput.membersOnly),
-        capacity: Number(eventInput.capacity) || 100,
+        capacity: Math.min(5000, Math.max(1, Number(eventInput.capacity) || 100)),
         status: autoApprove ? 'approved' : 'pending',
         createdByUid: firebaseUser.uid,
-        createdByName: clampStr(currentUser.name, 100),
+        createdByName: ensureMinLen(currentUser.name, 'Campus Crew', 2, 100),
         createdByRole: currentUser.role,
-        bannerImage: clampStr(eventInput.bannerImage, 500),
+        bannerImage: clampStr(eventInput.bannerImage || '/src/assets/images/gallery_hackathon_arena_1795100082455.jpg', 500),
         updatedAt: new Date().toISOString(),
       });
       addToast(
@@ -1208,18 +1266,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateEvent = async (id: string, updates: Partial<CampusEvent>) => {
-    if (!can('canEditDeleteAnyEvent')) return;
-    if (isDemoPreview || !firebaseUser) {
-      setFallbackEvents((prev) => prev.map((e) => (e.id === id ? { ...e, ...updates } : e)));
-      addToast('Event updated (Demo)', undefined, 'success');
-      return;
-    }
+    if (!can('canEditDeleteAnyEvent') || !firebaseUser) return;
     const path = `events/${id}`;
+    const sanitizedUpdates: Record<string, unknown> = {
+      updatedAt: new Date().toISOString(),
+    };
+    if (updates.title !== undefined) {
+      sanitizedUpdates.title = ensureMinLen(updates.title, 'Campus Coding Event', 3, 140);
+    }
+    if (updates.category !== undefined) sanitizedUpdates.category = updates.category;
+    if (updates.dateISO !== undefined) sanitizedUpdates.dateISO = clampStr(updates.dateISO, 40);
+    if (updates.venue !== undefined) {
+      sanitizedUpdates.venue = ensureMinLen(updates.venue, 'Paavai Campus', 2, 160);
+    }
+    if (updates.description !== undefined) {
+      sanitizedUpdates.description = ensureMinLen(updates.description, 'Campus Crew event', 5, 1000);
+    }
+    if (updates.membersOnly !== undefined) {
+      sanitizedUpdates.membersOnly = Boolean(updates.membersOnly);
+    }
+    if (updates.capacity !== undefined) {
+      sanitizedUpdates.capacity = Math.min(5000, Math.max(1, Number(updates.capacity) || 100));
+    }
+    if (updates.status !== undefined) sanitizedUpdates.status = updates.status;
+    if (updates.bannerImage !== undefined && updates.bannerImage.trim()) {
+      sanitizedUpdates.bannerImage = clampStr(updates.bannerImage, 500);
+    }
+
     try {
-      await updateDoc(doc(db, 'events', id), {
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      });
+      await updateDoc(doc(db, 'events', id), sanitizedUpdates);
       addToast('Event updated', 'Saved to Firestore.', 'success');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, path);
@@ -1227,13 +1302,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteEvent = async (id: string) => {
-    if (!can('canEditDeleteAnyEvent')) return;
-    if (isDemoPreview || !firebaseUser) {
-      setFallbackEvents((prev) => prev.filter((e) => e.id !== id));
-      setFallbackRegistrations((prev) => prev.filter((r) => r.eventId !== id));
-      addToast('Event removed (Demo)', undefined, 'info');
-      return;
-    }
+    if (!can('canEditDeleteAnyEvent') || !firebaseUser) return;
     const path = `events/${id}`;
     try {
       await deleteDoc(doc(db, 'events', id));
@@ -1259,39 +1328,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     message,
     priority,
   }) => {
-    if (!can('canCreateAnnouncements') || !currentUser) return;
+    if (!can('canCreateAnnouncements') || !currentUser || !firebaseUser) return;
     const autoApprove = can('canPublishAnnouncementsDirectly');
     const id = `ann_${Date.now()}`;
-
-    if (isDemoPreview || !firebaseUser) {
-      const next: Announcement = {
-        id,
-        title: title.trim(),
-        message: message.trim(),
-        priority,
-        date: new Date().toISOString().slice(0, 10),
-        status: autoApprove ? 'approved' : 'pending',
-        createdByName: currentUser.name,
-      };
-      setFallbackAnnouncements((prev) => [next, ...prev]);
-      addToast(
-        autoApprove ? 'Announcement published (Demo)' : 'Announcement queued (Demo)',
-        undefined,
-        autoApprove ? 'success' : 'info'
-      );
-      return;
-    }
-
     const path = `announcements/${id}`;
     try {
       await setDoc(doc(db, 'announcements', id), {
-        title: clampStr(title, 140),
-        message: clampStr(message, 1000),
+        title: ensureMinLen(title, 'Campus Update', 3, 140),
+        message: ensureMinLen(message, 'Details coming soon.', 5, 1000),
         date: new Date().toISOString().slice(0, 10),
         priority,
         status: autoApprove ? 'approved' : 'pending',
         createdByUid: firebaseUser.uid,
-        createdByName: clampStr(currentUser.name, 100),
+        createdByName: ensureMinLen(currentUser.name, 'Campus Crew', 2, 100),
         updatedAt: new Date().toISOString(),
       });
       addToast(
@@ -1305,12 +1354,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteAnnouncement = async (id: string) => {
-    if (!can('canDeleteAnnouncements')) return;
-    if (isDemoPreview || !firebaseUser) {
-      setFallbackAnnouncements((prev) => prev.filter((a) => a.id !== id));
-      addToast('Announcement deleted (Demo)', undefined, 'info');
-      return;
-    }
+    if (!can('canDeleteAnnouncements') || !firebaseUser) return;
     const path = `announcements/${id}`;
     try {
       await deleteDoc(doc(db, 'announcements', id));
@@ -1321,14 +1365,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const approveAnnouncement = async (id: string) => {
-    if (!can('canApproveContent')) return;
-    if (isDemoPreview || !firebaseUser) {
-      setFallbackAnnouncements((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, status: 'approved' } : a))
-      );
-      addToast('Announcement approved (Demo)', undefined, 'success');
-      return;
-    }
+    if (!can('canApproveContent') || !firebaseUser) return;
     const path = `announcements/${id}`;
     try {
       await updateDoc(doc(db, 'announcements', id), {
@@ -1342,14 +1379,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const rejectAnnouncement = async (id: string) => {
-    if (!can('canApproveContent')) return;
-    if (isDemoPreview || !firebaseUser) {
-      setFallbackAnnouncements((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, status: 'rejected' } : a))
-      );
-      addToast('Announcement rejected (Demo)', undefined, 'info');
-      return;
-    }
+    if (!can('canApproveContent') || !firebaseUser) return;
     const path = `announcements/${id}`;
     try {
       await updateDoc(doc(db, 'announcements', id), {
@@ -1364,7 +1394,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ---------------- REGISTRATIONS ----------------
   const registerForEvent = async (eventId: string) => {
-    if (!currentUser || !can('canRegisterForEvents')) {
+    if (!currentUser || !firebaseUser || !can('canRegisterForEvents')) {
       addToast(
         'Sign in required',
         'Sign in with a verified @paavai.edu.in account to register for events.',
@@ -1372,8 +1402,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       return;
     }
-    const target = events.find((e) => e.id === eventId);
-    if (!target) return;
+    const target = events.find((e) => e.id === eventId && e.status === 'approved');
+    if (!target) {
+      addToast('Unavailable', 'Only published events can accept registrations.', 'error');
+      return;
+    }
 
     const alreadyRegistered = registrations.some(
       (r) => r.eventId === eventId && r.userId === currentUser.id
@@ -1387,28 +1420,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const payload = {
       eventId: sanitizeId(eventId),
       userId: sanitizeId(currentUser.id),
-      userName: clampStr(currentUser.name, 100),
+      userName: ensureMinLen(currentUser.name, 'Paavai Student', 2, 100),
       userEmail: clampStr(currentUser.email, 160),
-      registerNumber: clampStr(currentUser.regNo || 'PEC-MEMBER', 20),
-      department: clampStr(currentUser.department || 'CSE', 40),
-      year: clampStr(currentUser.year || '1st Year', 20),
+      registerNumber: ensureMinLen(currentUser.regNo || 'PEC-MEMBER', 'PEC-MEMBER', 4, 20),
+      department: ensureMinLen(currentUser.department || 'CSE', 'CSE', 2, 40),
+      year: ensureMinLen(currentUser.year || '1st Year', '1st Year', 2, 20),
       registeredAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
     };
-
-    if (isDemoPreview || !firebaseUser) {
-      setFallbackRegistrations((prev) => [{ id: regId, ...payload }, ...prev]);
-      addToast('Registration confirmed (Demo)', `Seat reserved for "${target.title}".`, 'success');
-      return;
-    }
-
-    if (!hasLiveEvents) {
-      addToast(
-        'Database initializing',
-        'Starter events must be seeded to Firestore by the Campus Lead first.',
-        'info'
-      );
-      return;
-    }
 
     const path = `registrations/${regId}`;
     try {
@@ -1420,14 +1438,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const cancelRegistration = async (eventId: string) => {
-    if (!currentUser) return;
-    if (isDemoPreview || !firebaseUser) {
-      setFallbackRegistrations((prev) =>
-        prev.filter((r) => !(r.eventId === eventId && r.userId === currentUser.id))
-      );
-      addToast('Registration cancelled (Demo)', undefined, 'info');
-      return;
-    }
+    if (!currentUser || !firebaseUser) return;
     const existingReg = registrations.find(
       (r) => r.eventId === eventId && r.userId === firebaseUser.uid
     );
@@ -1482,30 +1493,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ---------------- LEADERBOARD CRUD ----------------
   const upsertLeaderboardEntry: AppContextValue['upsertLeaderboardEntry'] = async (entry) => {
-    if (!can('canUpdateLeaderboard')) return;
+    if (!can('canUpdateLeaderboard') || !firebaseUser) return;
     const id = entry.id || `lb_${Date.now()}`;
     const docPayload = {
-      name: clampStr(entry.name, 100),
-      registerNumber: clampStr(entry.registerNumber, 20),
-      department: clampStr(entry.department, 40),
-      year: clampStr(entry.year, 20),
-      score: Number(entry.score) || 0,
-      problemsSolved: Number(entry.problemsSolved) || 0,
+      name: ensureMinLen(entry.name, 'Paavai Coder', 2, 100),
+      registerNumber: ensureMinLen(entry.registerNumber, 'PEC0000', 4, 20),
+      department: ensureMinLen(entry.department, 'CSE', 2, 40),
+      year: ensureMinLen(entry.year, '1st Year', 2, 20),
+      score: Math.min(1000000, Math.max(0, Number(entry.score) || 0)),
+      problemsSolved: Math.min(50000, Math.max(0, Number(entry.problemsSolved) || 0)),
       hackerRankHandle: clampStr(entry.hackerRankHandle || '@coder_pec', 60),
       updatedAt: new Date().toISOString(),
     };
-
-    if (isDemoPreview || !firebaseUser) {
-      if (entry.id) {
-        setFallbackLeaderboard((prev) =>
-          prev.map((item) => (item.id === entry.id ? { ...docPayload, id } : item))
-        );
-      } else {
-        setFallbackLeaderboard((prev) => [...prev, { ...docPayload, id }]);
-      }
-      addToast('Leaderboard updated (Demo)', `${entry.name}: ${entry.score} pts`, 'success');
-      return;
-    }
 
     const path = `leaderboard/${id}`;
     try {
@@ -1517,12 +1516,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteLeaderboardEntry = async (id: string) => {
-    if (!can('canUpdateLeaderboard')) return;
-    if (isDemoPreview || !firebaseUser) {
-      setFallbackLeaderboard((prev) => prev.filter((item) => item.id !== id));
-      addToast('Entry removed (Demo)', undefined, 'info');
-      return;
-    }
+    if (!can('canUpdateLeaderboard') || !firebaseUser) return;
     const path = `leaderboard/${id}`;
     try {
       await deleteDoc(doc(db, 'leaderboard', id));
@@ -1534,25 +1528,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ---------------- GALLERY & RESOURCES ----------------
   const addGalleryPhoto: AppContextValue['addGalleryPhoto'] = async (photo) => {
-    if (!can('canUploadGallery') || !currentUser) return;
+    if (!can('canUploadGallery') || !currentUser || !firebaseUser) return;
     const id = `gal_${Date.now()}`;
-
-    if (isDemoPreview || !firebaseUser) {
-      setFallbackGallery((prev) => [{ ...photo, id, uploadedBy: currentUser.name }, ...prev]);
-      addToast('Photo uploaded (Demo)', photo.title, 'success');
-      return;
-    }
-
     const path = `gallery/${id}`;
     try {
       await setDoc(doc(db, 'gallery', id), {
-        title: clampStr(photo.title, 140),
+        title: ensureMinLen(photo.title, 'Campus Event Photo', 2, 140),
         category: photo.category,
         date: clampStr(photo.date, 30),
-        caption: clampStr(photo.caption, 500),
+        caption: ensureMinLen(photo.caption, 'Campus Crew snapshot', 3, 500),
         imageUrl: clampStr(photo.imageUrl, 500),
         uploadedByUid: firebaseUser.uid,
-        uploadedBy: clampStr(currentUser.name, 100),
+        uploadedBy: ensureMinLen(currentUser.name, 'Campus Crew', 2, 100),
       });
       addToast('Photo uploaded', `"${photo.title}" saved to Firestore gallery.`, 'success');
     } catch (err) {
@@ -1561,12 +1548,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteGalleryPhoto = async (id: string) => {
-    if (!can('canDeleteGallery')) return;
-    if (isDemoPreview || !firebaseUser) {
-      setFallbackGallery((prev) => prev.filter((g) => g.id !== id));
-      addToast('Photo deleted (Demo)', undefined, 'info');
-      return;
-    }
+    if (!can('canDeleteGallery') || !firebaseUser) return;
     const path = `gallery/${id}`;
     try {
       await deleteDoc(doc(db, 'gallery', id));
@@ -1577,26 +1559,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addResource: AppContextValue['addResource'] = async (res) => {
-    if (!can('canManageResources')) return;
+    if (!can('canManageResources') || !firebaseUser) return;
     const id = `res_${Date.now()}`;
-
-    if (isDemoPreview || !firebaseUser) {
-      setFallbackResources((prev) => [{ ...res, id }, ...prev]);
-      addToast('Resource published (Demo)', res.title, 'success');
-      return;
-    }
-
     const path = `resources/${id}`;
     try {
       await setDoc(doc(db, 'resources', id), {
-        title: clampStr(res.title, 140),
+        title: ensureMinLen(res.title, 'Practice Module', 3, 140),
         track: res.track,
         level: res.level,
         access: res.access,
-        estimatedHours: Number(res.estimatedHours) || 6,
-        problemCount: Number(res.problemCount) || 20,
-        summary: clampStr(res.summary, 600),
-        url: clampStr(res.url, 500),
+        estimatedHours: Math.min(500, Math.max(1, Number(res.estimatedHours) || 6)),
+        problemCount: Math.min(2000, Math.max(1, Number(res.problemCount) || 20)),
+        summary: ensureMinLen(res.summary, 'Curated HackerRank problem set.', 5, 600),
+        url: ensureMinLen(res.url, 'https://www.hackerrank.com', 8, 500),
         topics: (res.topics.length ? res.topics : ['Problem Solving']).slice(0, 10),
       });
       addToast('Resource published', `"${res.title}" added to roadmap.`, 'success');
@@ -1606,12 +1581,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteResource = async (id: string) => {
-    if (!can('canManageResources')) return;
-    if (isDemoPreview || !firebaseUser) {
-      setFallbackResources((prev) => prev.filter((r) => r.id !== id));
-      addToast('Resource removed (Demo)', undefined, 'info');
-      return;
-    }
+    if (!can('canManageResources') || !firebaseUser) return;
     const path = `resources/${id}`;
     try {
       await deleteDoc(doc(db, 'resources', id));
@@ -1622,7 +1592,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const toggleResourceCompleted = async (resourceId: string) => {
-    if (!currentUser) {
+    if (!currentUser || !firebaseUser) {
       addToast('Sign in to track progress', 'Log in to save completed modules.', 'info');
       return;
     }
@@ -1630,46 +1600,68 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ? completedResourceIds.filter((id) => id !== resourceId)
       : [...completedResourceIds, resourceId];
 
-    setCompletedResourceIds(next);
-
-    if (!isDemoPreview && firebaseUser) {
-      const path = `user_progress/${firebaseUser.uid}`;
-      try {
-        await setDoc(doc(db, 'user_progress', firebaseUser.uid), {
-          uid: firebaseUser.uid,
-          completedResourceIds: next.slice(0, 200),
-          updatedAt: new Date().toISOString(),
-        });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, path);
-      }
+    const path = `user_progress/${firebaseUser.uid}`;
+    try {
+      await setDoc(doc(db, 'user_progress', firebaseUser.uid), {
+        uid: firebaseUser.uid,
+        completedResourceIds: next.slice(0, 200),
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
     }
   };
 
   // ---------------- USERS, JOIN REQUESTS & SITE SETTINGS ----------------
   const updateUserRole = async (userId: string, newRole: Exclude<UserRole, 'outsider'>) => {
-    if (!can('canAssignRoles')) return;
+    if (!can('canAssignRoles') || !firebaseUser) return;
     if (userId === currentUser?.id) {
       addToast('Action blocked', 'You cannot change your own role.', 'error');
       return;
     }
     const targetUser = users.find((u) => u.id === userId);
     const displayName = targetUser?.name || 'Member';
-    if (isDemoPreview || !firebaseUser) {
-      setDemoUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u)));
-      addToast(
-        'Role updated (Demo)',
-        `${displayName} is now ${ROLE_META[newRole].label}.`,
-        'success'
-      );
-      return;
-    }
     const path = `users/${userId}`;
     try {
       await updateDoc(doc(db, 'users', userId), {
         role: newRole,
         updatedAt: new Date().toISOString(),
       });
+
+      if (newRole === 'lead' || newRole === 'crew') {
+        const userSnap = targetUser ? null : await getDoc(doc(db, 'users', userId));
+        const src = targetUser
+          ? {
+              name: targetUser.name,
+              department: targetUser.department,
+              year: targetUser.year,
+              bio: targetUser.bio,
+              hackerRankHandle: targetUser.hackerRankHandle,
+            }
+          : {
+              name: String(userSnap?.data()?.name || displayName),
+              department: String(userSnap?.data()?.department || 'CSE'),
+              year: String(userSnap?.data()?.year || '1st Year'),
+              bio: String(userSnap?.data()?.bio || ''),
+              hackerRankHandle: String(userSnap?.data()?.hackerRankHandle || ''),
+            };
+
+        await setDoc(
+          doc(db, 'team_members', userId),
+          buildTeamMemberPayload({
+            uid: userId,
+            name: src.name,
+            role: newRole,
+            department: src.department,
+            year: src.year,
+            bio: src.bio,
+            hackerRankHandle: src.hackerRankHandle,
+          })
+        );
+      } else {
+        await deleteDoc(doc(db, 'team_members', userId));
+      }
+
       addToast(
         'Role updated',
         `${displayName} is now ${ROLE_META[newRole].label}.`,
@@ -1681,19 +1673,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteUser = async (userId: string) => {
-    if (!can('canDeleteUsers')) return;
+    if (!can('canDeleteUsers') || !firebaseUser) return;
     if (userId === currentUser?.id) {
       addToast('Cannot remove active session', 'You cannot delete your own active account.', 'error');
-      return;
-    }
-    if (isDemoPreview || !firebaseUser) {
-      setDemoUsers((prev) => prev.filter((u) => u.id !== userId));
-      addToast('User removed (Demo)', undefined, 'info');
       return;
     }
     const path = `users/${userId}`;
     try {
       await deleteDoc(doc(db, 'users', userId));
+      await deleteDoc(doc(db, 'team_members', userId));
       addToast('User removed', 'Deleted from Firestore directory.', 'info');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
@@ -1703,22 +1691,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const submitJoinRequest: AppContextValue['submitJoinRequest'] = async (req) => {
     const id = `req_${Date.now()}`;
     const docPayload = {
-      name: clampStr(req.name, 100),
-      registerNumber: clampStr(req.registerNumber.toUpperCase(), 20),
-      department: clampStr(req.department, 40),
-      year: clampStr(req.year, 20),
+      name: ensureMinLen(req.name, 'Student Applicant', 3, 100),
+      registerNumber: ensureMinLen(req.registerNumber.toUpperCase(), 'PEC0000', 4, 20),
+      department: ensureMinLen(req.department, 'CSE', 2, 40),
+      year: ensureMinLen(req.year, '1st Year', 2, 20),
       email: clampStr(req.email.toLowerCase(), 160),
-      phone: clampStr(req.phone, 20),
-      skills: clampStr(req.skills, 400),
+      phone: ensureMinLen(req.phone, '0000000000', 8, 20),
+      skills: ensureMinLen(req.skills, 'Programming', 2, 400),
       submittedAt: new Date().toISOString().slice(0, 10),
       status: 'pending' as const,
     };
-
-    if (isDemoPreview) {
-      setFallbackJoinRequests((prev) => [{ id, ...docPayload }, ...prev]);
-      addToast('Application submitted (Demo)', 'Queued in Demo Lead dashboard.', 'success');
-      return;
-    }
 
     const path = `join_requests/${id}`;
     try {
@@ -1734,14 +1716,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const reviewJoinRequest = async (requestId: string, decision: 'approved' | 'rejected') => {
-    if (!can('canManageUsers')) return;
-    if (isDemoPreview || !firebaseUser) {
-      setFallbackJoinRequests((prev) =>
-        prev.map((r) => (r.id === requestId ? { ...r, status: decision } : r))
-      );
-      addToast(`Join request ${decision} (Demo)`, undefined, 'success');
-      return;
-    }
+    if (!can('canManageUsers') || !firebaseUser) return;
     const path = `join_requests/${requestId}`;
     try {
       await updateDoc(doc(db, 'join_requests', requestId), { status: decision });
@@ -1756,24 +1731,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateSiteSettings = async (updates: Partial<SiteSettings>) => {
-    if (!can('canManageSiteSettings')) return;
+    if (!can('canManageSiteSettings') || !firebaseUser) return;
     const merged = { ...siteSettings, ...updates };
-    if (isDemoPreview || !firebaseUser) {
-      setSiteSettings(merged);
-      addToast('Site settings saved (Demo)', undefined, 'success');
-      return;
-    }
     const path = 'site_settings/main';
     try {
       await setDoc(doc(db, 'site_settings', 'main'), {
-        chapterName: clampStr(merged.chapterName, 100),
-        collegeName: clampStr(merged.collegeName, 120),
-        tagline: clampStr(merged.tagline, 120),
-        contactEmail: clampStr(merged.contactEmail, 160),
-        campusLocation: clampStr(merged.campusLocation, 200),
+        chapterName: ensureMinLen(merged.chapterName, INITIAL_SITE_SETTINGS.chapterName, 2, 100),
+        collegeName: ensureMinLen(merged.collegeName, INITIAL_SITE_SETTINGS.collegeName, 2, 120),
+        tagline: ensureMinLen(merged.tagline, INITIAL_SITE_SETTINGS.tagline, 2, 120),
+        contactEmail: clampStr(merged.contactEmail || INITIAL_SITE_SETTINGS.contactEmail, 160),
+        campusLocation: ensureMinLen(
+          merged.campusLocation,
+          INITIAL_SITE_SETTINGS.campusLocation,
+          4,
+          200
+        ),
         applicationsOpen: Boolean(merged.applicationsOpen),
-        publicLeaderboardLimit: Number(merged.publicLeaderboardLimit) || 10,
-        hackerRankClubUrl: clampStr(merged.hackerRankClubUrl, 300),
+        publicLeaderboardLimit: Math.min(
+          50,
+          Math.max(3, Number(merged.publicLeaderboardLimit) || 10)
+        ),
+        hackerRankClubUrl: ensureMinLen(
+          merged.hackerRankClubUrl,
+          INITIAL_SITE_SETTINGS.hackerRankClubUrl,
+          8,
+          300
+        ),
         updatedAt: new Date().toISOString(),
       });
       addToast('Site settings saved', 'Persisted to Firestore.', 'success');
@@ -1783,33 +1766,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateOwnProfile: AppContextValue['updateOwnProfile'] = async (updates) => {
-    if (!currentUser || !can('canEditOwnProfile')) return;
-    if (isDemoPreview || !firebaseUser) {
-      setDemoUsers((prev) =>
-        prev.map((u) => (u.id === currentUser.id ? { ...u, ...updates } : u))
-      );
-      addToast('Profile saved (Demo)', undefined, 'success');
-      return;
-    }
+    if (!currentUser || !firebaseUser || !can('canEditOwnProfile')) return;
     const path = `users/${firebaseUser.uid}`;
+    const nextName =
+      updates.name !== undefined
+        ? ensureMinLen(updates.name, currentUser.name || 'Paavai Coder', 2, 100)
+        : currentUser.name;
+    const nextDepartment =
+      updates.department !== undefined
+        ? ensureMinLen(updates.department, currentUser.department || 'CSE', 2, 40)
+        : currentUser.department;
+    const nextYear =
+      updates.year !== undefined
+        ? ensureMinLen(updates.year, currentUser.year || '1st Year', 2, 20)
+        : currentUser.year;
+    const nextHandle =
+      updates.hackerRankHandle !== undefined
+        ? clampStr(updates.hackerRankHandle, 60)
+        : currentUser.hackerRankHandle;
+    const nextBio =
+      updates.bio !== undefined ? clampStr(updates.bio, 500) : currentUser.bio;
+
     try {
       await updateDoc(doc(db, 'users', firebaseUser.uid), {
-        ...(updates.name !== undefined ? { name: clampStr(updates.name, 100) } : {}),
+        ...(updates.name !== undefined ? { name: nextName } : {}),
         ...(updates.regNo !== undefined
           ? { regNo: clampStr(updates.regNo.toUpperCase(), 20) }
           : {}),
-        ...(updates.department !== undefined
-          ? { department: clampStr(updates.department, 40) }
-          : {}),
-        ...(updates.year !== undefined ? { year: clampStr(updates.year, 20) } : {}),
+        ...(updates.department !== undefined ? { department: nextDepartment } : {}),
+        ...(updates.year !== undefined ? { year: nextYear } : {}),
         ...(updates.phone !== undefined ? { phone: clampStr(updates.phone, 20) } : {}),
-        ...(updates.hackerRankHandle !== undefined
-          ? { hackerRankHandle: clampStr(updates.hackerRankHandle, 60) }
-          : {}),
-        ...(updates.bio !== undefined ? { bio: clampStr(updates.bio, 500) } : {}),
+        ...(updates.hackerRankHandle !== undefined ? { hackerRankHandle: nextHandle } : {}),
+        ...(updates.bio !== undefined ? { bio: nextBio } : {}),
         ...(updates.skills !== undefined ? { skills: updates.skills.slice(0, 12) } : {}),
         updatedAt: new Date().toISOString(),
       });
+
+      if (currentUser.role === 'lead' || currentUser.role === 'crew') {
+        await setDoc(
+          doc(db, 'team_members', firebaseUser.uid),
+          buildTeamMemberPayload({
+            uid: firebaseUser.uid,
+            name: nextName,
+            role: currentUser.role,
+            department: nextDepartment,
+            year: nextYear,
+            bio: nextBio,
+            hackerRankHandle: nextHandle,
+          })
+        );
+      }
+
       addToast('Profile saved', 'Updated in Firestore.', 'success');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, path);
@@ -1825,20 +1832,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         firebaseUser,
         needsEmailVerification,
         unverifiedEmail,
-        isDemoPreview,
         currentUser,
         currentRole,
         can,
         login,
-        loginWithGoogle,
         signup,
         resendVerificationEmail,
         refreshEmailVerification,
         logout,
-        switchDemoRole,
-        exitDemoPreview,
         siteSettings,
         users,
+        teamMembers,
         events,
         announcements,
         leaderboard,
@@ -1847,8 +1851,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         registrations,
         joinRequests,
         completedResourceIds,
-        isFirestoreSeeded,
-        seedDatabaseFromStarter,
         createEvent,
         updateEvent,
         deleteEvent,

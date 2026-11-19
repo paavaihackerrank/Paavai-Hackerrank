@@ -194,21 +194,27 @@ export const MemberDashboardPage: React.FC = () => {
             </Link>
           </div>
 
-          <div className="divide-y divide-slate-200 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821]">
-            {approvedAnnouncements.slice(0, 4).map((ann) => (
-              <div key={ann.id} className="p-4 space-y-1">
-                <p className="font-mono text-xs text-slate-500 dark:text-slate-400">
-                  {ann.date} · {ann.priority}
-                </p>
-                <h3 className="font-mono text-sm font-bold text-slate-900 dark:text-white">
-                  {ann.title}
-                </h3>
-                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                  {ann.message}
-                </p>
-              </div>
-            ))}
-          </div>
+          {approvedAnnouncements.length === 0 ? (
+            <div className="p-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] text-xs text-slate-500 dark:text-slate-400">
+              No campus announcements published yet.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-200 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821]">
+              {approvedAnnouncements.slice(0, 4).map((ann) => (
+                <div key={ann.id} className="p-4 space-y-1">
+                  <p className="font-mono text-xs text-slate-500 dark:text-slate-400">
+                    {ann.date} · {ann.priority}
+                  </p>
+                  <h3 className="font-mono text-sm font-bold text-slate-900 dark:text-white">
+                    {ann.title}
+                  </h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                    {ann.message}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       </div>
     </div>

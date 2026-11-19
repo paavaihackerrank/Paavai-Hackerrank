@@ -19,13 +19,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const {
     theme,
     toggleTheme,
-    isDemoPreview,
     currentUser,
     currentRole,
+    needsEmailVerification,
+    unverifiedEmail,
     can,
     logout,
-    switchDemoRole,
-    exitDemoPreview,
     siteSettings,
     toasts,
     dismissToast,
@@ -98,35 +97,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             ))}
           </nav>
 
-          {/* Zone 3: Demo Role Switcher, Theme Toggle & Auth Controls */}
+          {/* Zone 3: Theme Toggle & Auth Controls */}
           <div className="flex items-center gap-2.5 shrink-0">
-            {/* Switch Role (Demo) Dropdown */}
-            <div className="hidden md:flex items-center">
-              <label htmlFor="demo-role-switcher" className="sr-only">
-                Switch role (demo)
-              </label>
-              <select
-                id="demo-role-switcher"
-                aria-label="Switch role (demo)"
-                value={isDemoPreview ? currentRole : 'live'}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === 'live') {
-                    exitDemoPreview();
-                  } else {
-                    switchDemoRole(val as UserRole);
-                  }
-                }}
-                className="h-9 px-2.5 rounded-md text-xs font-mono bg-slate-100 dark:bg-[#121821] border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 cursor-pointer hover:border-[#00EA64]/60 transition-colors"
-                title="Switch role (demo) to preview permissions"
-              >
-                <option value="live">Live Firebase Auth</option>
-                <option value="outsider">Demo: Outsider (Guest)</option>
-                <option value="member">Demo: Student Member</option>
-                <option value="crew">Demo: Campus Crew</option>
-                <option value="lead">Demo: Campus Lead</option>
-              </select>
-            </div>
 
             {/* Dark / Light Toggle */}
             <button
@@ -169,6 +141,24 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                   <span>Logout</span>
                 </button>
               </div>
+            ) : needsEmailVerification && unverifiedEmail ? (
+              <div className="hidden sm:flex items-center gap-2.5 pl-1 border-l border-slate-200 dark:border-slate-800">
+                <Link
+                  to="/profile"
+                  className="h-9 px-3 rounded-md text-xs font-mono font-semibold border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                >
+                  <span>Verify Email</span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  aria-label="Logout"
+                  className="h-9 px-3 rounded-md text-xs font-medium border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                >
+                  <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Logout</span>
+                </button>
+              </div>
             ) : (
               <div className="hidden sm:flex items-center gap-2">
                 <Link
@@ -202,35 +192,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         {/* Mobile / Tablet Navigation Drawer */}
         {mobileMenuOpen && (
           <div className="xl:hidden border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B0F14] px-4 py-4 space-y-4 shadow-lg">
-            <div className="md:hidden">
-              <label
-                htmlFor="mobile-demo-role"
-                className="block text-xs font-mono text-slate-500 dark:text-slate-400 mb-1.5"
-              >
-                Switch role (demo)
-              </label>
-              <select
-                id="mobile-demo-role"
-                value={isDemoPreview ? currentRole : 'live'}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === 'live') {
-                    exitDemoPreview();
-                  } else {
-                    switchDemoRole(val as UserRole);
-                  }
-                  setMobileMenuOpen(false);
-                }}
-                className="w-full h-10 px-3 rounded-md text-xs font-mono bg-slate-100 dark:bg-[#121821] border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100"
-              >
-                <option value="live">Live Firebase Auth</option>
-                <option value="outsider">Demo: Outsider (Guest)</option>
-                <option value="member">Demo: Student Community Member</option>
-                <option value="crew">Demo: Campus Crew Member</option>
-                <option value="lead">Demo: Campus Lead</option>
-              </select>
-            </div>
-
             <nav aria-label="Mobile Navigation" className="grid grid-cols-2 gap-1.5">
               <Link
                 to="/"
@@ -272,6 +233,23 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                     >
                       {ROLE_META[currentRole].shortLabel}
                     </span>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="px-3 py-2 rounded-md text-xs font-medium border border-slate-200 dark:border-slate-800 text-red-600 dark:text-red-400"
+                  >
+                    Logout
+                  </button>
+                </>
+              ) : needsEmailVerification && unverifiedEmail ? (
+                <>
+                  <Link
+                    to="/profile"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="px-3 py-2 rounded-md text-xs font-mono font-semibold border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                  >
+                    Verify Email
                   </Link>
                   <button
                     type="button"
@@ -393,7 +371,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               Made by the HackerRank Campus Crew, Paavai Engineering College
             </p>
             <p className="font-mono">
-              Active Preview Role: {ROLE_META[currentRole].label}
+              {currentUser
+                ? `Signed in: ${ROLE_META[currentRole].label}`
+                : 'Paavai Engineering College · Verified Portal'}
             </p>
           </div>
         </div>

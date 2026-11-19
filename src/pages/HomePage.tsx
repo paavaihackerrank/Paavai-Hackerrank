@@ -12,18 +12,26 @@ export const HomePage: React.FC = () => {
     announcements,
     events,
     leaderboard,
+    resources,
+    teamMembers,
     currentRole,
     currentUser,
     can,
   } = useApp();
 
   const approvedAnnouncements = announcements.filter((a) => a.status === 'approved');
-  const upcomingEvents = events
-    .filter((e) => e.status === 'approved' && new Date(e.dateISO).getTime() > Date.now())
+  const approvedEvents = events.filter((e) => e.status === 'approved');
+  const upcomingEvents = approvedEvents
+    .filter((e) => new Date(e.dateISO).getTime() > Date.now())
     .sort((a, b) => new Date(a.dateISO).getTime() - new Date(b.dateISO).getTime());
   const nextEvent = upcomingEvents[0];
 
   const topThree = [...leaderboard].sort((a, b) => b.score - a.score).slice(0, 3);
+  const totalProblemsSolved = leaderboard.reduce(
+    (sum, entry) => sum + (Number(entry.problemsSolved) || 0),
+    0
+  );
+  const activeTracksCount = new Set(resources.map((r) => r.track)).size;
 
   return (
     <div>
@@ -116,14 +124,17 @@ export const HomePage: React.FC = () => {
 
               <div className="pt-2 text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span>Viewing as {ROLE_META[currentRole].label}</span>
-                {currentUser && (
+                {currentUser ? (
                   <>
                     <span aria-hidden="true">·</span>
                     <span>Signed in: {currentUser.name}</span>
                   </>
+                ) : (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span>Sign in with your @paavai.edu.in email for full member access</span>
+                  </>
                 )}
-                <span aria-hidden="true">·</span>
-                <span>Use the Demo dropdown in the navbar to preview all 4 access levels</span>
               </div>
             </motion.div>
 
@@ -154,38 +165,38 @@ export const HomePage: React.FC = () => {
             </motion.div>
           </div>
 
-          {/* Full-width Quantitative Proof Strip below Hero Split */}
+          {/* Full-width Quantitative Proof Strip below Hero Split (100% live from Firestore) */}
           <div className="mt-12 pt-8 border-t border-slate-200 dark:border-slate-800/90 grid grid-cols-2 lg:grid-cols-4 gap-6">
             <div>
               <p className="font-mono text-2xl sm:text-3xl font-bold tabular-nums text-slate-900 dark:text-white">
-                420+
+                {teamMembers.length}
               </p>
               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1">
-                Active student coders across 8 departments
+                Active Campus Lead &amp; Crew mentors
               </p>
             </div>
             <div>
               <p className="font-mono text-2xl sm:text-3xl font-bold tabular-nums text-slate-900 dark:text-white">
-                28
+                {approvedEvents.length}
               </p>
               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1">
-                Campus contests & labs hosted since 2025
+                Published campus contests &amp; workshops
               </p>
             </div>
             <div>
               <p className="font-mono text-2xl sm:text-3xl font-bold tabular-nums text-slate-900 dark:text-white">
-                12,400+
+                {totalProblemsSolved.toLocaleString()}
               </p>
               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1">
-                Verified HackerRank submissions logged
+                Problems solved across {leaderboard.length} ranked coder{leaderboard.length === 1 ? '' : 's'}
               </p>
             </div>
             <div>
               <p className="font-mono text-2xl sm:text-3xl font-bold tabular-nums text-[#009942] dark:text-[#00EA64]">
-                5 Tracks
+                {activeTracksCount} {activeTracksCount === 1 ? 'Track' : 'Tracks'}
               </p>
               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1">
-                DSA, Python, Java, SQL & Problem Solving
+                {resources.length} live roadmap module{resources.length === 1 ? '' : 's'} available
               </p>
             </div>
           </div>
@@ -331,28 +342,34 @@ export const HomePage: React.FC = () => {
                 Current Top Coders
               </h3>
 
-              <div className="mt-5 divide-y divide-slate-200 dark:divide-slate-800">
-                {topThree.map((entry, idx) => (
-                  <div key={entry.id} className="py-3 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="font-mono text-sm font-bold tabular-nums w-6 text-[#009942] dark:text-[#00EA64]">
-                        #{idx + 1}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
-                          {entry.name}
-                        </p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
-                          {entry.department} · {entry.year}
-                        </p>
+              {topThree.length === 0 ? (
+                <p className="text-sm text-slate-500 mt-4">
+                  No leaderboard standings published yet.
+                </p>
+              ) : (
+                <div className="mt-5 divide-y divide-slate-200 dark:divide-slate-800">
+                  {topThree.map((entry, idx) => (
+                    <div key={entry.id} className="py-3 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="font-mono text-sm font-bold tabular-nums w-6 text-[#009942] dark:text-[#00EA64]">
+                          #{idx + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                            {entry.name}
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {entry.department} · {entry.year}
+                          </p>
+                        </div>
                       </div>
+                      <span className="font-mono text-sm font-semibold tabular-nums text-slate-900 dark:text-slate-100 shrink-0">
+                        {entry.score.toLocaleString()} pts
+                      </span>
                     </div>
-                    <span className="font-mono text-sm font-semibold tabular-nums text-slate-900 dark:text-slate-100 shrink-0">
-                      {entry.score.toLocaleString()} pts
-                    </span>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-4">
               {can('canViewFullLeaderboard')

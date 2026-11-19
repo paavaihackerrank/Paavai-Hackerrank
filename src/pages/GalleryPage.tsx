@@ -23,7 +23,7 @@ export const GalleryPage: React.FC = () => {
   );
 
   useEffect(() => {
-    if (lightboxIdx === null) return;
+    if (lightboxIdx === null || filtered.length === 0) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setLightboxIdx(null);
       if (e.key === 'ArrowRight') {
@@ -111,53 +111,63 @@ export const GalleryPage: React.FC = () => {
       </header>
 
       {/* Gallery Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filtered.map((photo, idx) => (
-          <article
-            key={photo.id}
-            className="group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] flex flex-col"
-          >
-            <button
-              type="button"
-              onClick={() => setLightboxIdx(idx)}
-              className="aspect-[4/3] w-full overflow-hidden bg-slate-900 text-left relative focus-visible:outline-none"
+      {filtered.length === 0 ? (
+        <div className="p-12 text-center rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821]">
+          <p className="font-mono text-sm text-slate-600 dark:text-slate-400">
+            {gallery.length === 0
+              ? 'No event photos have been uploaded yet.'
+              : 'No event photos match this category yet.'}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filtered.map((photo, idx) => (
+            <article
+              key={photo.id}
+              className="group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] flex flex-col"
             >
-              <SafeImage
-                src={photo.imageUrl}
-                alt={photo.title}
-                className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
-                fallbackTitle={photo.title}
-              />
-            </button>
-            <div className="p-5 flex-1 flex flex-col justify-between gap-3">
-              <div>
-                <p className="font-mono text-xs text-slate-500 dark:text-slate-400">
-                  {photo.category} · {photo.date}
-                </p>
-                <h2 className="font-mono text-base font-bold text-slate-900 dark:text-white mt-1">
-                  {photo.title}
-                </h2>
-                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-1.5 leading-relaxed">
-                  {photo.caption}
-                </p>
+              <button
+                type="button"
+                onClick={() => setLightboxIdx(idx)}
+                className="aspect-[4/3] w-full overflow-hidden bg-slate-900 text-left relative focus-visible:outline-none"
+              >
+                <SafeImage
+                  src={photo.imageUrl}
+                  alt={photo.title}
+                  className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+                  fallbackTitle={photo.title}
+                />
+              </button>
+              <div className="p-5 flex-1 flex flex-col justify-between gap-3">
+                <div>
+                  <p className="font-mono text-xs text-slate-500 dark:text-slate-400">
+                    {photo.category} · {photo.date}
+                  </p>
+                  <h2 className="font-mono text-base font-bold text-slate-900 dark:text-white mt-1">
+                    {photo.title}
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-1.5 leading-relaxed">
+                    {photo.caption}
+                  </p>
+                </div>
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                  <span>Uploaded by {photo.uploadedBy}</span>
+                  {can('canDeleteGallery') && (
+                    <button
+                      type="button"
+                      onClick={() => deleteGalleryPhoto(photo.id)}
+                      aria-label={`Delete ${photo.title}`}
+                      className="text-slate-400 hover:text-red-500 transition-colors p-1"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-                <span>Uploaded by {photo.uploadedBy}</span>
-                {can('canDeleteGallery') && (
-                  <button
-                    type="button"
-                    onClick={() => deleteGalleryPhoto(photo.id)}
-                    aria-label={`Delete ${photo.title}`}
-                    className="text-slate-400 hover:text-red-500 transition-colors p-1"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-          </article>
-        ))}
-      </div>
+            </article>
+          ))}
+        </div>
+      )}
 
       {/* Accessible Lightbox Modal */}
       {activePhoto && lightboxIdx !== null && (

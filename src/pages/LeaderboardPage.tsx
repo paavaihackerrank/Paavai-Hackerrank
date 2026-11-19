@@ -147,7 +147,9 @@ export const LeaderboardPage: React.FC = () => {
               {filteredAndSorted.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-500 dark:text-slate-400">
-                    No coders match your current search or department filter.
+                    {leaderboard.length === 0
+                      ? 'No leaderboard standings published yet.'
+                      : 'No coders match your current search or department filter.'}
                   </td>
                 </tr>
               ) : (

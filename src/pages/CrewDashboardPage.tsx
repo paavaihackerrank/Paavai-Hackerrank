@@ -114,7 +114,7 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
   const pendingJoinCount = joinRequests.filter((r) => r.status === 'pending').length;
 
   const tabs: Array<{ id: DashboardTab; label: string; badge?: number }> = [
-    ...(isLead ? [{ id: 'members' as const, label: 'Members & Roles', badge: users.length }] : []),
+    ...(isLead ? [{ id: 'members' as const, label: 'Member Management', badge: users.length }] : []),
     { id: 'events', label: 'Events' },
     { id: 'announcements', label: 'Announcements' },
     { id: 'gallery', label: 'Gallery' },
@@ -455,42 +455,48 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
               All Campus Events ({events.length})
             </h2>
             <div className="divide-y divide-slate-200 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821]">
-              {events.map((ev) => (
-                <div key={ev.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="min-w-0 space-y-1">
-                    <p className="font-mono text-sm font-bold text-slate-900 dark:text-white truncate">
-                      {ev.title}
-                    </p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {ev.category} · {new Date(ev.dateISO).toLocaleDateString('en-IN')} · By{' '}
-                      {ev.createdByName} ·{' '}
-                      <span className={`font-mono font-semibold capitalize ${statusTextClass(ev.status)}`}>
-                        {ev.status}
-                      </span>
-                    </p>
-                  </div>
-                  {can('canEditDeleteAnyEvent') && (
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => startEditEvent(ev)}
-                        aria-label={`Edit ${ev.title}`}
-                        className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-[#00EA64]"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteEvent(ev.id)}
-                        aria-label={`Delete ${ev.title}`}
-                        className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-red-500 hover:border-red-500/50"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+              {events.length === 0 ? (
+                <p className="p-6 text-xs text-slate-500 dark:text-slate-400">
+                  No events created yet. Use the form to publish a new campus event.
+                </p>
+              ) : (
+                events.map((ev) => (
+                  <div key={ev.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <p className="font-mono text-sm font-bold text-slate-900 dark:text-white truncate">
+                        {ev.title}
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {ev.category} · {new Date(ev.dateISO).toLocaleDateString('en-IN')} · By{' '}
+                        {ev.createdByName} ·{' '}
+                        <span className={`font-mono font-semibold capitalize ${statusTextClass(ev.status)}`}>
+                          {ev.status}
+                        </span>
+                      </p>
                     </div>
-                  )}
-                </div>
-              ))}
+                    {can('canEditDeleteAnyEvent') && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => startEditEvent(ev)}
+                          aria-label={`Edit ${ev.title}`}
+                          className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-[#00EA64]"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteEvent(ev.id)}
+                          aria-label={`Delete ${ev.title}`}
+                          className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-red-500 hover:border-red-500/50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -565,32 +571,38 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
               Announcement Feed ({announcements.length})
             </h2>
             <div className="divide-y divide-slate-200 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821]">
-              {announcements.map((a) => (
-                <div key={a.id} className="p-4 flex items-start justify-between gap-4">
-                  <div className="space-y-1">
-                    <p className="font-mono text-sm font-bold text-slate-900 dark:text-white">
-                      {a.title}
-                    </p>
-                    <p className="text-xs text-slate-600 dark:text-slate-300">{a.message}</p>
-                    <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
-                      {a.date} · {a.priority} · By {a.createdByName} ·{' '}
-                      <span className={`font-semibold capitalize ${statusTextClass(a.status)}`}>
-                        {a.status}
-                      </span>
-                    </p>
+              {announcements.length === 0 ? (
+                <p className="p-6 text-xs text-slate-500 dark:text-slate-400">
+                  No announcements posted yet.
+                </p>
+              ) : (
+                announcements.map((a) => (
+                  <div key={a.id} className="p-4 flex items-start justify-between gap-4">
+                    <div className="space-y-1">
+                      <p className="font-mono text-sm font-bold text-slate-900 dark:text-white">
+                        {a.title}
+                      </p>
+                      <p className="text-xs text-slate-600 dark:text-slate-300">{a.message}</p>
+                      <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                        {a.date} · {a.priority} · By {a.createdByName} ·{' '}
+                        <span className={`font-semibold capitalize ${statusTextClass(a.status)}`}>
+                          {a.status}
+                        </span>
+                      </p>
+                    </div>
+                    {can('canDeleteAnnouncements') && (
+                      <button
+                        type="button"
+                        onClick={() => deleteAnnouncement(a.id)}
+                        aria-label={`Delete ${a.title}`}
+                        className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-red-500"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
-                  {can('canDeleteAnnouncements') && (
-                    <button
-                      type="button"
-                      onClick={() => deleteAnnouncement(a.id)}
-                      aria-label={`Delete ${a.title}`}
-                      className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-red-500"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -667,28 +679,34 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
           </form>
 
           <div className="lg:col-span-7 divide-y divide-slate-200 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] h-fit">
-            {gallery.map((g) => (
-              <div key={g.id} className="p-4 flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white truncate">
-                    {g.title}
-                  </p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {g.category} · {g.date} · Uploaded by {g.uploadedBy}
-                  </p>
+            {gallery.length === 0 ? (
+              <p className="p-6 text-xs text-slate-500 dark:text-slate-400">
+                No gallery photos uploaded yet.
+              </p>
+            ) : (
+              gallery.map((g) => (
+                <div key={g.id} className="p-4 flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white truncate">
+                      {g.title}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {g.category} · {g.date} · Uploaded by {g.uploadedBy}
+                    </p>
+                  </div>
+                  {can('canDeleteGallery') && (
+                    <button
+                      type="button"
+                      onClick={() => deleteGalleryPhoto(g.id)}
+                      aria-label={`Delete ${g.title}`}
+                      className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-red-500 shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
-                {can('canDeleteGallery') && (
-                  <button
-                    type="button"
-                    onClick={() => deleteGalleryPhoto(g.id)}
-                    aria-label={`Delete ${g.title}`}
-                    className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-red-500 shrink-0"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       )}
@@ -832,26 +850,32 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
           </form>
 
           <div className="lg:col-span-7 divide-y divide-slate-200 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] h-fit">
-            {resources.map((r) => (
-              <div key={r.id} className="p-4 flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white truncate">
-                    {r.title}
-                  </p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {r.track} · {r.level} · {r.access === 'basic' ? 'Public Basic' : 'Members Only'}
-                  </p>
+            {resources.length === 0 ? (
+              <p className="p-6 text-xs text-slate-500 dark:text-slate-400">
+                No roadmap modules published yet.
+              </p>
+            ) : (
+              resources.map((r) => (
+                <div key={r.id} className="p-4 flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white truncate">
+                      {r.title}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {r.track} · {r.level} · {r.access === 'basic' ? 'Public Basic' : 'Members Only'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => deleteResource(r.id)}
+                    aria-label={`Remove ${r.title}`}
+                    className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-red-500 shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => deleteResource(r.id)}
-                  aria-label={`Remove ${r.title}`}
-                  className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-red-500 shrink-0"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       )}
@@ -987,50 +1011,56 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
           </form>
 
           <div className="lg:col-span-7 divide-y divide-slate-200 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] max-h-[540px] overflow-y-auto">
-            {[...leaderboard]
-              .sort((a, b) => b.score - a.score)
-              .map((entry, idx) => (
-                <div key={entry.id} className="p-3.5 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
-                      <span className="font-mono text-[#009942] dark:text-[#00EA64] mr-2">
-                        #{idx + 1}
-                      </span>
-                      {entry.name}
-                    </p>
-                    <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
-                      {entry.department} · {entry.year} · {entry.score} pts ({entry.problemsSolved}{' '}
-                      solved)
-                    </p>
+            {leaderboard.length === 0 ? (
+              <p className="p-6 text-xs text-slate-500 dark:text-slate-400">
+                No coders added to the leaderboard yet.
+              </p>
+            ) : (
+              [...leaderboard]
+                .sort((a, b) => b.score - a.score)
+                .map((entry, idx) => (
+                  <div key={entry.id} className="p-3.5 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                        <span className="font-mono text-[#009942] dark:text-[#00EA64] mr-2">
+                          #{idx + 1}
+                        </span>
+                        {entry.name}
+                      </p>
+                      <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                        {entry.department} · {entry.year} · {entry.score} pts ({entry.problemsSolved}{' '}
+                        solved)
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLbEditId(entry.id);
+                          setLbName(entry.name);
+                          setLbReg(entry.registerNumber);
+                          setLbDept(entry.department);
+                          setLbYear(entry.year);
+                          setLbScore(entry.score);
+                          setLbSolved(entry.problemsSolved);
+                          setLbHandle(entry.hackerRankHandle);
+                        }}
+                        className="px-2.5 py-1 rounded text-xs font-mono border border-slate-200 dark:border-slate-700 hover:border-[#00EA64]"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteLeaderboardEntry(entry.id)}
+                        aria-label={`Remove ${entry.name}`}
+                        className="p-1.5 rounded border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-red-500"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLbEditId(entry.id);
-                        setLbName(entry.name);
-                        setLbReg(entry.registerNumber);
-                        setLbDept(entry.department);
-                        setLbYear(entry.year);
-                        setLbScore(entry.score);
-                        setLbSolved(entry.problemsSolved);
-                        setLbHandle(entry.hackerRankHandle);
-                      }}
-                      className="px-2.5 py-1 rounded text-xs font-mono border border-slate-200 dark:border-slate-700 hover:border-[#00EA64]"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteLeaderboardEntry(entry.id)}
-                      aria-label={`Remove ${entry.name}`}
-                      className="p-1.5 rounded border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-red-500"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))
+            )}
           </div>
         </div>
       )}
@@ -1074,27 +1104,35 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {registrations.map((reg) => {
-                  const ev = events.find((e) => e.id === reg.eventId);
-                  return (
-                    <tr key={reg.id}>
-                      <td className="py-3 px-4">
-                        <p className="font-medium text-slate-900 dark:text-white">{reg.userName}</p>
-                        <p className="text-xs text-slate-500">{reg.userEmail}</p>
-                      </td>
-                      <td className="py-3 px-4 font-mono text-xs">{reg.registerNumber}</td>
-                      <td className="py-3 px-4 text-xs text-slate-600 dark:text-slate-300">
-                        {reg.department} · {reg.year}
-                      </td>
-                      <td className="py-3 px-4 text-xs font-medium text-slate-800 dark:text-slate-200">
-                        {ev?.title ?? reg.eventId}
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono text-xs tabular-nums text-slate-500">
-                        {reg.registeredAt}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {registrations.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-10 px-4 text-center text-xs text-slate-500 dark:text-slate-400">
+                      No event registrations recorded yet.
+                    </td>
+                  </tr>
+                ) : (
+                  registrations.map((reg) => {
+                    const ev = events.find((e) => e.id === reg.eventId);
+                    return (
+                      <tr key={reg.id}>
+                        <td className="py-3 px-4">
+                          <p className="font-medium text-slate-900 dark:text-white">{reg.userName}</p>
+                          <p className="text-xs text-slate-500">{reg.userEmail}</p>
+                        </td>
+                        <td className="py-3 px-4 font-mono text-xs">{reg.registerNumber}</td>
+                        <td className="py-3 px-4 text-xs text-slate-600 dark:text-slate-300">
+                          {reg.department} · {reg.year}
+                        </td>
+                        <td className="py-3 px-4 text-xs font-medium text-slate-800 dark:text-slate-200">
+                          {ev?.title ?? reg.eventId}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-xs tabular-nums text-slate-500">
+                          {reg.registeredAt}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>

@@ -12,11 +12,13 @@
         "department": { "type": "string", "minLength": 2, "maxLength": 40 },
         "year": { "type": "string", "minLength": 2, "maxLength": 20 },
         "role": { "type": "string", "enum": ["lead", "crew", "member"] },
+        "emailVerified": { "type": "boolean" },
         "phone": { "type": "string", "minLength": 0, "maxLength": 20 },
         "hackerRankHandle": { "type": "string", "minLength": 0, "maxLength": 60 },
         "bio": { "type": "string", "minLength": 0, "maxLength": 500 },
         "skills": { "type": "array", "description": "Up to 12 skill tags" },
         "joinedAt": { "type": "string", "minLength": 4, "maxLength": 30 },
+        "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email", "name", "regNo", "department", "year", "role"]
@@ -164,12 +166,33 @@
         "completedResourceIds": { "type": "array", "description": "Up to 200 completed resource IDs" }
       },
       "required": ["uid", "completedResourceIds"]
+    },
+    "TeamMemberPublic": {
+      "title": "TeamMemberPublic",
+      "description": "Non-PII public profile card for verified Campus Lead and Campus Crew members.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "role": { "type": "string", "enum": ["lead", "crew"] },
+        "designation": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "department": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "year": { "type": "string", "minLength": 2, "maxLength": 20 },
+        "bio": { "type": "string", "minLength": 0, "maxLength": 500 },
+        "hackerRankHandle": { "type": "string", "minLength": 0, "maxLength": 60 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "role", "designation", "department", "year"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
       "description": "Verified Paavai member profiles and roles; no status field; reads restricted to owner or Campus Lead."
+    },
+    "/team_members/{memberId}": {
+      "schema": { "$ref": "#/entities/TeamMemberPublic" },
+      "description": "Public non-PII directory of active Campus Lead and Campus Crew members synced from users."
     },
     "/events/{eventId}": {
       "schema": { "$ref": "#/entities/CampusEvent" },

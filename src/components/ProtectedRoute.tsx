@@ -8,6 +8,7 @@ interface ProtectedRouteProps {
   requireAuth?: boolean;
   requiredPermission?: PermissionKey;
   requiredRoleLabel?: string;
+  allowPendingVerification?: boolean;
 }
 
 /**
@@ -19,11 +20,12 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   requireAuth = true,
   requiredPermission,
   requiredRoleLabel,
+  allowPendingVerification = false,
 }) => {
-  const { authReady, isDemoPreview, currentUser, can } = useApp();
+  const { authReady, currentUser, needsEmailVerification, can } = useApp();
   const location = useLocation();
 
-  if (!isDemoPreview && !authReady) {
+  if (!authReady) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-24 text-center">
         <p className="font-mono text-xs text-slate-500 dark:text-slate-400">
@@ -31,6 +33,10 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
         </p>
       </div>
     );
+  }
+
+  if (allowPendingVerification && needsEmailVerification) {
+    return <>{children}</>;
   }
 
   if (requireAuth && !currentUser) {

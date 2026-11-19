@@ -1,11 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Calendar, CheckCircle2 } from 'lucide-react';
 import { ACADEMIC_YEARS, DEPARTMENTS, ROLE_META } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
+import { VerificationBanner } from '../components/VerificationBanner';
 
 export const ProfilePage: React.FC = () => {
-  const { currentUser, events, registrations, updateOwnProfile, cancelRegistration } = useApp();
+  const {
+    currentUser,
+    needsEmailVerification,
+    unverifiedEmail,
+    events,
+    registrations,
+    updateOwnProfile,
+    cancelRegistration,
+  } = useApp();
+  const navigate = useNavigate();
 
   const [name, setName] = useState(currentUser?.name ?? '');
   const [department, setDepartment] = useState(currentUser?.department ?? DEPARTMENTS[0]);
@@ -25,6 +35,29 @@ export const ProfilePage: React.FC = () => {
     setBio(currentUser.bio);
     setSkillsText(currentUser.skills.join(', '));
   }, [currentUser]);
+
+  if (needsEmailVerification && unverifiedEmail) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-14 space-y-6">
+        <header className="space-y-1.5 border-b border-slate-200 dark:border-slate-800 pb-5">
+          <p className="font-mono text-xs font-semibold text-amber-600 dark:text-amber-400">
+            Account Activation Required
+          </p>
+          <h1 className="font-mono text-3xl font-bold text-slate-900 dark:text-white">
+            Member Profile
+          </h1>
+          <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
+            {unverifiedEmail} · Pending Email Verification
+          </p>
+        </header>
+
+        <VerificationBanner
+          email={unverifiedEmail}
+          onVerified={(path) => navigate(path, { replace: true })}
+        />
+      </div>
+    );
+  }
 
   if (!currentUser) return null;
 

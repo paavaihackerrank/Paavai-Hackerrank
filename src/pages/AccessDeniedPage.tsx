@@ -1,7 +1,7 @@
 import React from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { ShieldAlert } from 'lucide-react';
-import { ROLE_META, UserRole } from '../config/rbacAndData';
+import { ROLE_META } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 
 interface DeniedLocationState {
@@ -11,15 +11,9 @@ interface DeniedLocationState {
 }
 
 export const AccessDeniedPage: React.FC = () => {
-  const { currentRole, switchDemoRole } = useApp();
+  const { currentRole } = useApp();
   const location = useLocation();
-  const navigate = useNavigate();
   const state = (location.state as DeniedLocationState | null) ?? {};
-
-  const handlePreviewRole = (role: UserRole) => {
-    switchDemoRole(role);
-    navigate(state.from || '/');
-  };
 
   return (
     <div className="max-w-xl mx-auto px-4 sm:px-6 py-20">
@@ -58,33 +52,6 @@ export const AccessDeniedPage: React.FC = () => {
           >
             Back to Home
           </Link>
-        </div>
-
-        <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-2">
-          <p className="font-mono text-xs text-slate-500">Or switch demo role to inspect this route:</p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => handlePreviewRole('lead')}
-              className="px-3 py-1.5 rounded-md text-xs font-mono border border-slate-300 dark:border-slate-700 hover:border-[#00EA64]"
-            >
-              Preview as Campus Lead
-            </button>
-            <button
-              type="button"
-              onClick={() => handlePreviewRole('crew')}
-              className="px-3 py-1.5 rounded-md text-xs font-mono border border-slate-300 dark:border-slate-700 hover:border-[#00EA64]"
-            >
-              Preview as Campus Crew
-            </button>
-            <button
-              type="button"
-              onClick={() => handlePreviewRole('member')}
-              className="px-3 py-1.5 rounded-md text-xs font-mono border border-slate-300 dark:border-slate-700 hover:border-[#00EA64]"
-            >
-              Preview as Student Member
-            </button>
-          </div>
         </div>
       </div>
     </div>

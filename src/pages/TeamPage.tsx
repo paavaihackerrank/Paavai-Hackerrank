@@ -1,11 +1,23 @@
 import React from 'react';
-import { Code2, Github, Linkedin } from 'lucide-react';
-import { TEAM_MEMBERS } from '../config/rbacAndData';
-import { SafeImage } from '../components/SafeImage';
+import { Code2, ShieldCheck, Users } from 'lucide-react';
+import { useApp } from '../context/AppContext';
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'HC';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
 
 export const TeamPage: React.FC = () => {
-  const lead = TEAM_MEMBERS.find((m) => m.isLead);
-  const crewMembers = TEAM_MEMBERS.filter((m) => !m.isLead);
+  const { teamMembers } = useApp();
+
+  const leads = teamMembers
+    .filter((m) => m.role === 'lead')
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const crewMembers = teamMembers
+    .filter((m) => m.role === 'crew')
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 space-y-14">
@@ -17,146 +29,130 @@ export const TeamPage: React.FC = () => {
           Meet the Campus Crew
         </h1>
         <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400 leading-relaxed">
-          The student engineers who author weekly coding problems, mentor peers through DSA
-          roadmaps, and organize HackerRank competitions across campus.
+          Live roster of verified Campus Leads and Campus Crew members actively organizing
+          competitions, mentoring peers, and curating coding roadmaps across campus.
         </p>
       </header>
 
-      {/* Featured Campus Lead Card */}
-      {lead && (
-        <section aria-labelledby="campus-lead-heading" className="space-y-4">
-          <h2
-            id="campus-lead-heading"
-            className="font-mono text-sm font-semibold text-slate-500 dark:text-slate-400"
-          >
-            01. Campus Lead
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-12 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821]">
-            <div className="md:col-span-4 lg:col-span-3 aspect-square md:aspect-auto overflow-hidden bg-slate-900">
-              <SafeImage
-                src={lead.photo}
-                alt={`${lead.name}, ${lead.designation}`}
-                className={`w-full h-full object-cover ${lead.photoPosition ?? 'object-top'}`}
-                fallbackTitle={lead.name}
-              />
-            </div>
-            <div className="md:col-span-8 lg:col-span-9 p-6 sm:p-8 flex flex-col justify-between gap-6">
-              <div className="space-y-3">
-                <div className="text-xs font-mono text-[#009942] dark:text-[#00EA64]">
-                  {lead.designation} · {lead.department} · {lead.year}
-                </div>
-                <h3 className="font-mono text-2xl font-bold text-slate-900 dark:text-white">
-                  {lead.name}
-                </h3>
-                <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed max-w-2xl">
-                  {lead.bio}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-4 pt-4 border-t border-slate-200 dark:border-slate-800 text-xs font-mono">
-                <a
-                  href={lead.github}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors"
-                >
-                  <Github className="w-4 h-4" aria-hidden="true" />
-                  <span>GitHub</span>
-                </a>
-                <a
-                  href={lead.linkedin}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors"
-                >
-                  <Linkedin className="w-4 h-4" aria-hidden="true" />
-                  <span>LinkedIn</span>
-                </a>
-                <a
-                  href={lead.hackerrank}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors"
-                >
-                  <Code2 className="w-4 h-4" aria-hidden="true" />
-                  <span>HackerRank</span>
-                </a>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Campus Crew Grid */}
-      <section aria-labelledby="crew-members-heading" className="space-y-5">
-        <h2
-          id="crew-members-heading"
-          className="font-mono text-sm font-semibold text-slate-500 dark:text-slate-400"
-        >
-          02. Campus Crew Members
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {crewMembers.map((member) => (
-            <article
-              key={member.id}
-              className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] flex flex-col"
-            >
-              <div className="aspect-square overflow-hidden bg-slate-900">
-                <SafeImage
-                  src={member.photo}
-                  alt={`${member.name}, ${member.designation}`}
-                  className={`w-full h-full object-cover ${member.photoPosition ?? 'object-top'}`}
-                  fallbackTitle={member.name}
-                />
-              </div>
-              <div className="p-5 flex-1 flex flex-col justify-between gap-4">
-                <div>
-                  <p className="font-mono text-xs text-[#009942] dark:text-[#00EA64]">
-                    {member.designation}
-                  </p>
-                  <h3 className="font-mono text-lg font-bold text-slate-900 dark:text-white mt-1">
-                    {member.name}
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    {member.department} · {member.year}
-                  </p>
-                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-3 leading-relaxed">
-                    {member.bio}
-                  </p>
-                </div>
-                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center gap-4 text-xs font-mono">
-                  <a
-                    href={member.github}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label={`${member.name} on GitHub`}
-                    className="text-slate-500 dark:text-slate-400 hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors"
-                  >
-                    <Github className="w-4 h-4" />
-                  </a>
-                  <a
-                    href={member.linkedin}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label={`${member.name} on LinkedIn`}
-                    className="text-slate-500 dark:text-slate-400 hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors"
-                  >
-                    <Linkedin className="w-4 h-4" />
-                  </a>
-                  <a
-                    href={member.hackerrank}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label={`${member.name} on HackerRank`}
-                    className="text-slate-500 dark:text-slate-400 hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors"
-                  >
-                    <Code2 className="w-4 h-4" />
-                  </a>
-                </div>
-              </div>
-            </article>
-          ))}
+      {teamMembers.length === 0 ? (
+        <div className="p-10 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] text-center space-y-2">
+          <Users className="w-7 h-7 text-slate-400 mx-auto" aria-hidden="true" />
+          <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
+            No leadership profiles published yet
+          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Campus Lead and promoted Campus Crew members appear here automatically in real time.
+          </p>
         </div>
-      </section>
+      ) : (
+        <>
+          {/* Campus Lead Section */}
+          <section aria-labelledby="campus-lead-heading" className="space-y-4">
+            <h2
+              id="campus-lead-heading"
+              className="font-mono text-sm font-semibold text-slate-500 dark:text-slate-400"
+            >
+              01. Campus Lead{leads.length === 1 ? '' : 's'} ({leads.length})
+            </h2>
+            {leads.length === 0 ? (
+              <p className="p-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] text-sm text-slate-500">
+                No Campus Lead profile listed yet.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {leads.map((lead) => (
+                  <article
+                    key={lead.id}
+                    className="p-6 sm:p-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] flex flex-col md:flex-row md:items-center gap-6"
+                  >
+                    <div className="w-20 h-20 rounded-xl bg-[#00EA64]/15 border border-[#00EA64]/40 text-[#009942] dark:text-[#00EA64] flex items-center justify-center font-mono text-2xl font-bold shrink-0">
+                      {getInitials(lead.name)}
+                    </div>
+                    <div className="flex-1 space-y-2.5">
+                      <div className="inline-flex items-center gap-1.5 text-xs font-mono text-[#009942] dark:text-[#00EA64]">
+                        <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>
+                          {lead.designation} · {lead.department} · {lead.year}
+                        </span>
+                      </div>
+                      <h3 className="font-mono text-2xl font-bold text-slate-900 dark:text-white">
+                        {lead.name}
+                      </h3>
+                      {lead.bio && (
+                        <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed max-w-3xl">
+                          {lead.bio}
+                        </p>
+                      )}
+                      {lead.hackerRankHandle && (
+                        <p className="pt-2 inline-flex items-center gap-1.5 text-xs font-mono text-slate-500 dark:text-slate-400">
+                          <Code2 className="w-4 h-4 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
+                          <span>HackerRank: {lead.hackerRankHandle}</span>
+                        </p>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Campus Crew Grid */}
+          <section aria-labelledby="crew-members-heading" className="space-y-5">
+            <h2
+              id="crew-members-heading"
+              className="font-mono text-sm font-semibold text-slate-500 dark:text-slate-400"
+            >
+              02. Campus Crew Members ({crewMembers.length})
+            </h2>
+            {crewMembers.length === 0 ? (
+              <p className="p-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] text-sm text-slate-500">
+                No Campus Crew members have been assigned yet. Verified students promoted to Crew by
+                the Campus Lead appear here automatically.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {crewMembers.map((member) => (
+                  <article
+                    key={member.id}
+                    className="p-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] flex flex-col justify-between gap-4"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-12 h-12 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-700 dark:text-sky-300 flex items-center justify-center font-mono text-sm font-bold shrink-0">
+                          {getInitials(member.name)}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-mono text-[11px] text-[#009942] dark:text-[#00EA64]">
+                            {member.designation}
+                          </p>
+                          <h3 className="font-mono text-lg font-bold text-slate-900 dark:text-white truncate">
+                            {member.name}
+                          </h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {member.department} · {member.year}
+                          </p>
+                        </div>
+                      </div>
+                      {member.bio && (
+                        <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                          {member.bio}
+                        </p>
+                      )}
+                    </div>
+
+                    {member.hackerRankHandle && (
+                      <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center gap-1.5 text-xs font-mono text-slate-500 dark:text-slate-400">
+                        <Code2 className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
+                        <span>{member.hackerRankHandle}</span>
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
     </div>
   );
 };

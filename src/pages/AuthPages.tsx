@@ -1,112 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { MailCheck, RefreshCw } from 'lucide-react';
+import { MailCheck } from 'lucide-react';
 import { ACADEMIC_YEARS, DEPARTMENTS, getDashboardPath } from '../config/rbacAndData';
 import { isAllowedCollegeEmail, useApp } from '../context/AppContext';
-
-const VerificationNoticeCard: React.FC<{
-  email: string;
-  onVerified: (redirectPath: string) => void;
-}> = ({ email, onVerified }) => {
-  const { resendVerificationEmail, refreshEmailVerification, logout } = useApp();
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-
-  const handleCheckVerified = async () => {
-    setBusy(true);
-    setError('');
-    setMessage('');
-    const res = await refreshEmailVerification();
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.error || 'Email is not verified yet.');
-      return;
-    }
-    onVerified(res.redirectPath || '/dashboard/member');
-  };
-
-  const handleResend = async () => {
-    setBusy(true);
-    setError('');
-    setMessage('');
-    const res = await resendVerificationEmail();
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.error || 'Could not resend email.');
-      return;
-    }
-    setMessage('A fresh verification link has been sent to your @paavai.edu.in inbox.');
-  };
-
-  return (
-    <div className="max-w-md mx-auto px-4 sm:px-6 py-16">
-      <div className="p-6 sm:p-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] space-y-5">
-        <div className="w-11 h-11 rounded-lg bg-[#00EA64]/10 border border-[#00EA64]/30 flex items-center justify-center text-[#009942] dark:text-[#00EA64]">
-          <MailCheck className="w-5 h-5" aria-hidden="true" />
-        </div>
-
-        <div className="space-y-1.5">
-          <p className="font-mono text-xs font-semibold text-[#009942] dark:text-[#00EA64]">
-            Step 2 of 2 · Email Verification
-          </p>
-          <h1 className="font-mono text-2xl font-bold text-slate-900 dark:text-white">
-            Verify Your Paavai Email
-          </h1>
-          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-            We sent a verification link to <strong className="font-mono">{email}</strong>. Click the
-            link in your inbox, then continue straight to your member dashboard.
-          </p>
-        </div>
-
-        {error && (
-          <div
-            role="alert"
-            className="p-3 rounded-lg text-xs font-medium bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400"
-          >
-            {error}
-          </div>
-        )}
-
-        {message && (
-          <div className="p-3 rounded-lg text-xs font-medium bg-[#00EA64]/10 border border-[#00EA64]/30 text-[#009942] dark:text-[#00EA64]">
-            {message}
-          </div>
-        )}
-
-        <div className="space-y-2.5">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={handleCheckVerified}
-            className="w-full py-2.5 px-4 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60 inline-flex items-center justify-center gap-2"
-          >
-            <RefreshCw className={`w-4 h-4 ${busy ? 'animate-spin' : ''}`} />
-            <span>{busy ? 'Checking...' : "I've Verified My Email — Continue"}</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={busy}
-            onClick={handleResend}
-            className="w-full py-2.5 px-4 rounded-lg text-xs font-medium border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#00EA64] transition-colors disabled:opacity-60"
-          >
-            Resend Verification Email
-          </button>
-
-          <button
-            type="button"
-            disabled={busy}
-            onClick={logout}
-            className="w-full py-2 text-xs font-mono text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
-          >
-            Use a different email
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
+import { VerificationBanner } from '../components/VerificationBanner';
 
 export const LoginPage: React.FC = () => {
   const {
@@ -115,8 +12,6 @@ export const LoginPage: React.FC = () => {
     needsEmailVerification,
     unverifiedEmail,
     login,
-    loginWithGoogle,
-    switchDemoRole,
   } = useApp();
   const navigate = useNavigate();
 
@@ -133,10 +28,12 @@ export const LoginPage: React.FC = () => {
 
   if (needsEmailVerification && unverifiedEmail) {
     return (
-      <VerificationNoticeCard
-        email={unverifiedEmail}
-        onVerified={(path) => navigate(path, { replace: true })}
-      />
+      <div className="max-w-xl mx-auto px-4 sm:px-6 py-16 space-y-6">
+        <VerificationBanner
+          email={unverifiedEmail}
+          onVerified={(path) => navigate(path, { replace: true })}
+        />
+      </div>
     );
   }
 
@@ -164,23 +61,25 @@ export const LoginPage: React.FC = () => {
     navigate(res.redirectPath || '/dashboard/member', { replace: true });
   };
 
-  const handleGoogleSignIn = async () => {
-    setSubmitting(true);
-    setError('');
-    const res = await loginWithGoogle();
-    setSubmitting(false);
-    if (!res.ok) {
-      setError(res.error || 'Google sign-in failed.');
-      return;
-    }
-    if (res.needsVerification) {
-      return;
-    }
-    navigate(res.redirectPath || '/dashboard/member', { replace: true });
-  };
-
   return (
-    <div className="max-w-md mx-auto px-4 sm:px-6 py-16">
+    <div className="max-w-md mx-auto px-4 sm:px-6 py-16 space-y-5">
+      <div
+        role="note"
+        className="p-4 rounded-xl border border-amber-500/40 bg-amber-500/10 flex items-start gap-3"
+      >
+        <MailCheck className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
+        <div className="space-y-1 text-xs leading-relaxed">
+          <p className="font-mono font-semibold text-amber-700 dark:text-amber-300">
+            Email Verification Required to Activate Account
+          </p>
+          <p className="text-slate-700 dark:text-slate-300">
+            New members must check their <strong>@paavai.edu.in</strong> email for a verification
+            link to activate their account. Unverified accounts are automatically deleted after{' '}
+            <strong>12 hours</strong>.
+          </p>
+        </div>
+      </div>
+
       <div className="p-6 sm:p-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] space-y-6">
         <div className="space-y-1.5">
           <p className="font-mono text-xs font-semibold text-[#009942] dark:text-[#00EA64]">
@@ -203,23 +102,6 @@ export const LoginPage: React.FC = () => {
             {error}
           </div>
         )}
-
-        <button
-          type="button"
-          disabled={submitting}
-          onClick={handleGoogleSignIn}
-          className="w-full py-2.5 px-4 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
-        >
-          <span>Continue with Google (@paavai.edu.in)</span>
-        </button>
-
-        <div className="relative flex items-center py-1">
-          <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
-          <span className="shrink mx-3 text-[11px] font-mono text-slate-400">
-            or email & password
-          </span>
-          <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
-        </div>
 
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <div>
@@ -259,39 +141,11 @@ export const LoginPage: React.FC = () => {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full py-2.5 rounded-lg text-sm font-semibold border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white hover:border-[#00EA64] transition-colors disabled:opacity-60"
+            className="w-full py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60"
           >
             {submitting ? 'Signing in...' : 'Sign in with Email'}
           </button>
         </form>
-
-        {/* Demo Preview Quick-Switch */}
-        <div className="pt-5 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
-          <p className="font-mono text-xs text-slate-500 dark:text-slate-400">
-            Instant role preview (local demo mode):
-          </p>
-          <div className="grid grid-cols-1 gap-2">
-            {(
-              [
-                ['lead', 'Preview as Campus Lead'],
-                ['crew', 'Preview as Campus Crew Member'],
-                ['member', 'Preview as Student Community Member'],
-              ] as const
-            ).map(([role, label]) => (
-              <button
-                key={role}
-                type="button"
-                onClick={() => {
-                  switchDemoRole(role);
-                  navigate(getDashboardPath(role));
-                }}
-                className="w-full px-3 py-2 rounded-lg text-left text-xs font-medium border border-slate-200 dark:border-slate-800 hover:border-[#00EA64] text-slate-700 dark:text-slate-200 transition-colors"
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
 
         <p className="text-xs text-center text-slate-500 dark:text-slate-400">
           New to Paavai HackerRank Crew?{' '}
@@ -311,7 +165,6 @@ export const SignUpPage: React.FC = () => {
     needsEmailVerification,
     unverifiedEmail,
     signup,
-    loginWithGoogle,
   } = useApp();
   const navigate = useNavigate();
 
@@ -337,27 +190,14 @@ export const SignUpPage: React.FC = () => {
 
   if (needsEmailVerification && unverifiedEmail) {
     return (
-      <VerificationNoticeCard
-        email={unverifiedEmail}
-        onVerified={(path) => navigate(path, { replace: true })}
-      />
+      <div className="max-w-xl mx-auto px-4 sm:px-6 py-16 space-y-6">
+        <VerificationBanner
+          email={unverifiedEmail}
+          onVerified={(path) => navigate(path, { replace: true })}
+        />
+      </div>
     );
   }
-
-  const handleGoogleSignUp = async () => {
-    setSubmitting(true);
-    setError('');
-    const res = await loginWithGoogle();
-    setSubmitting(false);
-    if (!res.ok) {
-      setError(res.error || 'Google sign-in failed.');
-      return;
-    }
-    if (res.needsVerification) {
-      return;
-    }
-    navigate(res.redirectPath || '/dashboard/member', { replace: true });
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -430,23 +270,6 @@ export const SignUpPage: React.FC = () => {
             {error}
           </div>
         )}
-
-        <button
-          type="button"
-          disabled={submitting}
-          onClick={handleGoogleSignUp}
-          className="w-full py-2.5 px-4 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60"
-        >
-          Continue with Google (@paavai.edu.in)
-        </button>
-
-        <div className="relative flex items-center py-1">
-          <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
-          <span className="shrink mx-3 text-[11px] font-mono text-slate-400">
-            or register with @paavai.edu.in email
-          </span>
-          <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
-        </div>
 
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -587,7 +410,7 @@ export const SignUpPage: React.FC = () => {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full py-2.5 rounded-lg text-sm font-semibold border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white hover:border-[#00EA64] transition-colors disabled:opacity-60"
+            className="w-full py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60"
           >
             {submitting ? 'Creating Account...' : 'Sign Up with @paavai.edu.in Email'}
           </button>

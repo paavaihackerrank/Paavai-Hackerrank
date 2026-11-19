@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Check,
-  Database,
   Download,
   Filter,
   Loader2,
@@ -28,17 +27,29 @@ export const MemberDirectoryPanel: React.FC = () => {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const departmentOptions = useMemo(() => {
-    const extra = users
-      .map((u) => u.department.trim())
-      .filter((d) => d && !DEPARTMENTS.includes(d));
-    return [...DEPARTMENTS, ...Array.from(new Set(extra))];
+    const seen = new Set(DEPARTMENTS.map((d) => d.toLowerCase()));
+    const extra: string[] = [];
+    for (const u of users) {
+      const dept = (u.department || '').trim();
+      if (dept && !seen.has(dept.toLowerCase())) {
+        seen.add(dept.toLowerCase());
+        extra.push(dept);
+      }
+    }
+    return [...DEPARTMENTS, ...extra];
   }, [users]);
 
   const yearOptions = useMemo(() => {
-    const extra = users
-      .map((u) => u.year.trim())
-      .filter((y) => y && !ACADEMIC_YEARS.includes(y));
-    return [...ACADEMIC_YEARS, ...Array.from(new Set(extra))];
+    const seen = new Set(ACADEMIC_YEARS.map((y) => y.toLowerCase()));
+    const extra: string[] = [];
+    for (const u of users) {
+      const yr = (u.year || '').trim();
+      if (yr && !seen.has(yr.toLowerCase())) {
+        seen.add(yr.toLowerCase());
+        extra.push(yr);
+      }
+    }
+    return [...ACADEMIC_YEARS, ...extra];
   }, [users]);
 
   const roleCounts = useMemo(
@@ -53,18 +64,23 @@ export const MemberDirectoryPanel: React.FC = () => {
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
     return users.filter((u) => {
-      if (departmentFilter !== 'all' && u.department.trim() !== departmentFilter) return false;
-      if (yearFilter !== 'all' && u.year.trim() !== yearFilter) return false;
+      if (
+        departmentFilter !== 'all' &&
+        (u.department || '').trim().toLowerCase() !== departmentFilter.toLowerCase()
+      ) {
+        return false;
+      }
+      if (
+        yearFilter !== 'all' &&
+        (u.year || '').trim().toLowerCase() !== yearFilter.toLowerCase()
+      ) {
+        return false;
+      }
       if (roleFilter !== 'all' && u.role !== roleFilter) return false;
       if (!q) return true;
       return (
-        u.name.toLowerCase().includes(q) ||
-        u.email.toLowerCase().includes(q) ||
-        u.regNo.toLowerCase().includes(q) ||
-        u.department.toLowerCase().includes(q) ||
-        u.year.toLowerCase().includes(q) ||
-        u.hackerRankHandle.toLowerCase().includes(q) ||
-        ROLE_META[u.role].label.toLowerCase().includes(q)
+        (u.name || '').toLowerCase().includes(q) ||
+        (u.regNo || '').toLowerCase().includes(q)
       );
     });
   }, [users, search, departmentFilter, yearFilter, roleFilter]);
@@ -117,16 +133,19 @@ export const MemberDirectoryPanel: React.FC = () => {
       ].join(',')
     );
     const csv = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
+    link.style.display = 'none';
     const dateStamp = new Date().toISOString().slice(0, 10);
     link.download = hasActiveFilters
       ? `hrcc-paavai-members-filtered-${dateStamp}.csv`
       : `hrcc-paavai-members-${dateStamp}.csv`;
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(link);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     addToast(
       'Members CSV exported',
       `Downloaded ${filteredUsers.length} member record${filteredUsers.length === 1 ? '' : 's'}.`,
@@ -194,13 +213,18 @@ export const MemberDirectoryPanel: React.FC = () => {
 
           {can('canManageUsers') && (
             <button
+              id="export-members-csv-btn"
               type="button"
               onClick={handleExportMembersCSV}
               disabled={filteredUsers.length === 0}
+              aria-label={`Export ${filteredUsers.length} filtered members to CSV`}
               className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-50 inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
             >
               <Download className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Export to CSV ({filteredUsers.length})</span>
+              <span>Export to CSV</span>
+              <span className="font-mono text-[11px] opacity-80 tabular-nums">
+                ({filteredUsers.length})
+              </span>
             </button>
           )}
         </div>
@@ -215,7 +239,7 @@ export const MemberDirectoryPanel: React.FC = () => {
               htmlFor="member-search-input"
               className="block font-mono text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1"
             >
-              Search Member
+              Search by Name or Register No.
             </label>
             <div className="relative">
               <Search
@@ -225,10 +249,10 @@ export const MemberDirectoryPanel: React.FC = () => {
               <input
                 id="member-search-input"
                 type="search"
-                aria-label="Filter users by name or registration number"
+                aria-label="Filter members by name or register number"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name or registration number..."
+                placeholder="Search by name or register number..."
                 className="h-9 pl-9 pr-8 w-full rounded-lg text-xs bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700 focus:outline-none focus:border-[#00EA64]"
               />
               {search && (
@@ -381,6 +405,11 @@ export const MemberDirectoryPanel: React.FC = () => {
                         {isSelf && (
                           <span className="font-mono text-[11px] text-[#009942] dark:text-[#00EA64]">
                             (You)
+                          </span>
+                        )}
+                        {user.emailVerified === false && (
+                          <span className="ml-1.5 font-mono text-[11px] text-amber-600 dark:text-amber-400">
+                            · Pending Verification
                           </span>
                         )}
                       </p>
@@ -555,8 +584,7 @@ export const JoinRequestsPanel: React.FC = () => {
 };
 
 export const SiteSettingsPanel: React.FC = () => {
-  const { siteSettings, isDemoPreview, firebaseUser, seedDatabaseFromStarter, updateSiteSettings } =
-    useApp();
+  const { siteSettings, updateSiteSettings } = useApp();
   const [settingsForm, setSettingsForm] = useState(siteSettings);
 
   useEffect(() => {
@@ -674,16 +702,6 @@ export const SiteSettingsPanel: React.FC = () => {
         >
           Save Site Settings
         </button>
-        {!isDemoPreview && firebaseUser && (
-          <button
-            type="button"
-            onClick={seedDatabaseFromStarter}
-            className="px-4 py-2.5 rounded-lg text-xs font-mono border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#00EA64] inline-flex items-center gap-1.5"
-          >
-            <Database className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" />
-            <span>Seed Starter Data to Firestore</span>
-          </button>
-        )}
       </div>
     </form>
   );

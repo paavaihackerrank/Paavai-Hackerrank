@@ -28,8 +28,8 @@ const ScrollToTop: React.FC = () => {
 };
 
 const RoleDashboardRedirect: React.FC = () => {
-  const { authReady, isDemoPreview, currentUser, currentRole } = useApp();
-  if (!isDemoPreview && !authReady) return null;
+  const { authReady, currentUser, currentRole } = useApp();
+  if (!authReady) return null;
   if (!currentUser || currentRole === 'outsider') {
     return <Navigate to="/login" replace />;
   }
@@ -59,12 +59,13 @@ export default function App() {
               <Route path="/signup" element={<SignUpPage />} />
               <Route path="/access-denied" element={<AccessDeniedPage />} />
 
-              {/* Protected: All Verified Logged-In Roles */}
+              {/* Protected: All Verified Logged-In Roles (pending users see verification banner) */}
               <Route
                 path="/profile"
                 element={
                   <ProtectedRoute
                     requireAuth
+                    allowPendingVerification
                     requiredPermission="canEditOwnProfile"
                     requiredRoleLabel="Student Community Member, Campus Crew, or Campus Lead"
                   >

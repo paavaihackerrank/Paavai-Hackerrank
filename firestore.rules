@@ -33,6 +33,12 @@ service cloud.firestore {
         && request.auth.token.email.lower().matches('^[a-z0-9._%+\\-]+@paavai\\.edu\\.in$');
     }
 
+    function hasAllowedCollegeAuth() {
+      return request.auth != null
+        && request.auth.token.email is string
+        && (isPaavaiEmail() || isBootstrappedAdmin());
+    }
+
     // signedIn() requires a verified @paavai.edu.in email (or bootstrapped Campus Lead)
     function signedIn() {
       return request.auth != null
@@ -87,7 +93,7 @@ service cloud.firestore {
     // ------------------------------------------------------------------------
     function isValidUserProfile(data) {
       return data.keys().hasAll(['uid', 'email', 'name', 'regNo', 'department', 'year', 'role'])
-        && data.keys().hasOnly(['uid', 'email', 'name', 'regNo', 'department', 'year', 'role', 'phone', 'hackerRankHandle', 'bio', 'skills', 'joinedAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'name', 'regNo', 'department', 'year', 'role', 'emailVerified', 'phone', 'hackerRankHandle', 'bio', 'skills', 'joinedAt', 'createdAt', 'updatedAt'])
         && isValidId(data.uid)
         && isValidEmail(data.email)
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 100
@@ -95,11 +101,13 @@ service cloud.firestore {
         && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
         && data.year is string && data.year.size() >= 2 && data.year.size() <= 20
         && data.role in ['lead', 'crew', 'member']
+        && (!('emailVerified' in data) || data.emailVerified is bool)
         && (!('phone' in data) || (data.phone is string && data.phone.size() <= 20))
         && (!('hackerRankHandle' in data) || (data.hackerRankHandle is string && data.hackerRankHandle.size() <= 60))
         && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
         && (!('skills' in data) || (data.skills is list && data.skills.size() <= 12 && (data.skills.size() == 0 || data.skills[0] is string)))
         && (!('joinedAt' in data) || (data.joinedAt is string && data.joinedAt.size() >= 4 && data.joinedAt.size() <= 30))
+        && (!('createdAt' in data) || isValidTimestampStr(data.createdAt))
         && (!('updatedAt' in data) || isValidTimestampStr(data.updatedAt));
     }
 
@@ -210,6 +218,20 @@ service cloud.firestore {
         && data.hackerRankClubUrl is string && data.hackerRankClubUrl.size() >= 8 && data.hackerRankClubUrl.size() <= 300;
     }
 
+    function isValidTeamMemberPublic(data) {
+      return data.keys().hasAll(['uid', 'name', 'role', 'designation', 'department', 'year'])
+        && data.keys().hasOnly(['uid', 'name', 'role', 'designation', 'department', 'year', 'bio', 'hackerRankHandle', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 100
+        && data.role in ['lead', 'crew']
+        && data.designation is string && data.designation.size() >= 2 && data.designation.size() <= 100
+        && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
+        && data.year is string && data.year.size() >= 2 && data.year.size() <= 20
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && (!('hackerRankHandle' in data) || (data.hackerRankHandle is string && data.hackerRankHandle.size() <= 60))
+        && (!('updatedAt' in data) || isValidTimestampStr(data.updatedAt));
+    }
+
     // ------------------------------------------------------------------------
     // COLLECTION MATCH BLOCKS
     // ------------------------------------------------------------------------
@@ -218,17 +240,33 @@ service cloud.firestore {
       allow get: if true;
     }
 
-    // Users (verified @paavai.edu.in; no status field; users cannot change own role)
+    // Users (verified @paavai.edu.in activated immediately; unverified signups saved with emailVerified: false for 12h scheduled cleanup)
     match /users/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isCampusLead());
+      allow get: if isValidId(userId) && ((hasAllowedCollegeAuth() && request.auth.uid == userId) || isCampusLead());
       allow list: if isCampusLead() || (signedIn() && existing().uid == request.auth.uid);
 
-      allow create: if signedIn() && isValidId(userId) && isValidUserProfile(incoming()) && (
+      allow create: if isValidId(userId) && isValidUserProfile(incoming()) && (
         isCampusLead() ||
-        (isOwner(userId) && incoming().uid == request.auth.uid && incoming().email.lower() == request.auth.token.email.lower() && (
-          (isBootstrappedAdmin() && incoming().role == 'lead') ||
-          incoming().role == 'member'
-        ))
+        (
+          signedIn() &&
+          isOwner(userId) &&
+          incoming().uid == request.auth.uid &&
+          incoming().email.lower() == request.auth.token.email.lower() &&
+          (!('emailVerified' in incoming()) || incoming().emailVerified == true) &&
+          (
+            (isBootstrappedAdmin() && incoming().role == 'lead') ||
+            incoming().role == 'member'
+          )
+        ) ||
+        (
+          hasAllowedCollegeAuth() &&
+          request.auth.uid == userId &&
+          incoming().uid == request.auth.uid &&
+          incoming().email.lower() == request.auth.token.email.lower() &&
+          incoming().role == 'member' &&
+          incoming().emailVerified == false &&
+          isValidTimestampStr(incoming().createdAt)
+        )
       );
 
       allow update: if signedIn() && isValidId(userId) && isValidUserProfile(incoming()) && (
@@ -244,11 +282,27 @@ service cloud.firestore {
           incoming().uid == existing().uid &&
           incoming().email == existing().email &&
           incoming().role == existing().role &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'regNo', 'department', 'year', 'phone', 'hackerRankHandle', 'bio', 'skills', 'updatedAt'])
+          (!('emailVerified' in incoming()) || incoming().emailVerified == true) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'regNo', 'department', 'year', 'phone', 'hackerRankHandle', 'bio', 'skills', 'emailVerified', 'updatedAt'])
         )
       );
 
       allow delete: if isValidId(userId) && isCampusLead() && request.auth.uid != userId;
+    }
+
+    // Public Team Roster (non-PII Lead & Crew directory synced from /users)
+    match /team_members/{memberId} {
+      allow get: if isValidId(memberId);
+      allow list: if true;
+
+      allow create, update: if signedIn() && isValidId(memberId) && isValidTeamMemberPublic(incoming())
+        && incoming().uid == memberId
+        && (
+          isCampusLead() ||
+          (isOwner(memberId) && isCrewOrLead() && incoming().role == getUserRole())
+        );
+
+      allow delete: if isValidId(memberId) && isCampusLead();
     }
 
     // Events (Approved = public; Pending/Rejected = Crew & Lead; Edit/Delete/Approve = Lead)
