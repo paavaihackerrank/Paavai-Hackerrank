@@ -1,0 +1,58 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Poppins', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  --color-hr-green: #00EA64;
+  --color-hr-green-dark: #00C454;
+  --color-hr-ink: #0B0F14;
+  --color-hr-surface: #121821;
+  --color-hr-elevated: #18212E;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    scroll-behavior: smooth;
+  }
+
+  h1, h2, h3, h4, .font-heading {
+    font-family: var(--font-mono);
+    text-wrap: balance;
+  }
+
+  /* Optical compensation for dark mode legibility */
+  .dark body {
+    letter-spacing: 0.008em;
+  }
+
+  /* Accessible focus ring using HackerRank green */
+  :focus-visible {
+    outline: 2px solid #00EA64;
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Subtle engineering grid background for hero accents */
+.bg-tech-grid {
+  background-image: linear-gradient(to right, rgba(0, 234, 100, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 234, 100, 0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.dark .bg-tech-grid {
+  background-image: linear-gradient(to right, rgba(0, 234, 100, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 234, 100, 0.05) 1px, transparent 1px);
+}

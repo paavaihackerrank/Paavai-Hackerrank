@@ -1,0 +1,6 @@
+{
+  "name": "HackerRank Campus Crew – Paavai Engineering College",
+  "description": "Official competitive programming community portal with role-based access control for the HackerRank Campus Crew at Paavai Engineering College. Code. Compete. Conquer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

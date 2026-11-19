@@ -1,0 +1,211 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Verified Paavai Engineering College member profile and RBAC role assignment.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "minLength": 5, "maxLength": 160 },
+        "name": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "regNo": { "type": "string", "minLength": 4, "maxLength": 20, "pattern": "^[A-Za-z0-9\\-]+$" },
+        "department": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "year": { "type": "string", "minLength": 2, "maxLength": 20 },
+        "role": { "type": "string", "enum": ["lead", "crew", "member"] },
+        "phone": { "type": "string", "minLength": 0, "maxLength": 20 },
+        "hackerRankHandle": { "type": "string", "minLength": 0, "maxLength": 60 },
+        "bio": { "type": "string", "minLength": 0, "maxLength": 500 },
+        "skills": { "type": "array", "description": "Up to 12 skill tags" },
+        "joinedAt": { "type": "string", "minLength": 4, "maxLength": 30 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "name", "regNo", "department", "year", "role"]
+    },
+    "CampusEvent": {
+      "title": "CampusEvent",
+      "description": "Contests, workshops, bootcamps, and hackathons hosted by HRCC Paavai.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 3, "maxLength": 140 },
+        "category": { "type": "string", "enum": ["Contest", "Workshop", "Hackathon", "Bootcamp"] },
+        "dateISO": { "type": "string", "minLength": 10, "maxLength": 40 },
+        "venue": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "description": { "type": "string", "minLength": 5, "maxLength": 1000 },
+        "membersOnly": { "type": "boolean" },
+        "capacity": { "type": "number" },
+        "status": { "type": "string", "enum": ["approved", "pending", "rejected"] },
+        "createdByUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdByName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "createdByRole": { "type": "string", "enum": ["lead", "crew", "member", "outsider"] },
+        "bannerImage": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "category", "dateISO", "venue", "description", "membersOnly", "capacity", "status", "createdByUid", "createdByName", "createdByRole", "bannerImage"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Campus-wide announcements with Campus Lead approval status.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 3, "maxLength": 140 },
+        "message": { "type": "string", "minLength": 5, "maxLength": 1000 },
+        "date": { "type": "string", "minLength": 8, "maxLength": 30 },
+        "priority": { "type": "string", "enum": ["Normal", "Important"] },
+        "status": { "type": "string", "enum": ["approved", "pending", "rejected"] },
+        "createdByUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdByName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "message", "date", "priority", "status", "createdByUid", "createdByName"]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Verified Paavai campus coder standing.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "registerNumber": { "type": "string", "minLength": 4, "maxLength": 20, "pattern": "^[A-Za-z0-9\\-]+$" },
+        "department": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "year": { "type": "string", "minLength": 2, "maxLength": 20 },
+        "score": { "type": "number" },
+        "problemsSolved": { "type": "number" },
+        "hackerRankHandle": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "registerNumber", "department", "year", "score", "problemsSolved", "hackerRankHandle"]
+    },
+    "LearningResource": {
+      "title": "LearningResource",
+      "description": "Curated DSA, Python, Java, SQL, and Problem Solving roadmap module.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 3, "maxLength": 140 },
+        "track": { "type": "string", "enum": ["DSA", "Python", "Java", "SQL", "Problem Solving"] },
+        "level": { "type": "string", "enum": ["Beginner", "Intermediate", "Advanced"] },
+        "access": { "type": "string", "enum": ["basic", "full"] },
+        "estimatedHours": { "type": "number" },
+        "problemCount": { "type": "number" },
+        "summary": { "type": "string", "minLength": 5, "maxLength": 600 },
+        "url": { "type": "string", "minLength": 8, "maxLength": 500 },
+        "topics": { "type": "array", "description": "Up to 10 topic tags" }
+      },
+      "required": ["title", "track", "level", "access", "estimatedHours", "problemCount", "summary", "url", "topics"]
+    },
+    "GalleryPhoto": {
+      "title": "GalleryPhoto",
+      "description": "Campus event photograph and caption.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "category": { "type": "string", "enum": ["Hackathon", "Workshop", "Awards", "Community"] },
+        "date": { "type": "string", "minLength": 8, "maxLength": 30 },
+        "caption": { "type": "string", "minLength": 3, "maxLength": 500 },
+        "imageUrl": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "uploadedByUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "uploadedBy": { "type": "string", "minLength": 2, "maxLength": 100 }
+      },
+      "required": ["title", "category", "date", "caption", "imageUrl", "uploadedByUid", "uploadedBy"]
+    },
+    "EventRegistration": {
+      "title": "EventRegistration",
+      "description": "Student seat reservation for a campus event.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "userEmail": { "type": "string", "format": "email", "minLength": 5, "maxLength": 160 },
+        "registerNumber": { "type": "string", "minLength": 4, "maxLength": 20 },
+        "department": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "year": { "type": "string", "minLength": 2, "maxLength": 20 },
+        "registeredAt": { "type": "string", "minLength": 8, "maxLength": 40 }
+      },
+      "required": ["eventId", "userId", "userName", "userEmail", "registerNumber", "department", "year", "registeredAt"]
+    },
+    "JoinRequest": {
+      "title": "JoinRequest",
+      "description": "Public Join Us interest inquiry submitted by prospective students.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 3, "maxLength": 100 },
+        "registerNumber": { "type": "string", "minLength": 4, "maxLength": 20, "pattern": "^[A-Za-z0-9\\-]+$" },
+        "department": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "year": { "type": "string", "minLength": 2, "maxLength": 20 },
+        "email": { "type": "string", "format": "email", "minLength": 5, "maxLength": 160 },
+        "phone": { "type": "string", "minLength": 8, "maxLength": 20 },
+        "skills": { "type": "string", "minLength": 2, "maxLength": 400 },
+        "submittedAt": { "type": "string", "minLength": 8, "maxLength": 30 },
+        "status": { "type": "string", "enum": ["approved", "pending", "rejected"] }
+      },
+      "required": ["name", "registerNumber", "department", "year", "email", "phone", "skills", "submittedAt", "status"]
+    },
+    "SiteSettings": {
+      "title": "SiteSettings",
+      "description": "Global chapter configuration managed by Campus Lead.",
+      "type": "object",
+      "properties": {
+        "chapterName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "collegeName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "tagline": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "contactEmail": { "type": "string", "minLength": 5, "maxLength": 160 },
+        "campusLocation": { "type": "string", "minLength": 4, "maxLength": 200 },
+        "applicationsOpen": { "type": "boolean" },
+        "publicLeaderboardLimit": { "type": "number" },
+        "hackerRankClubUrl": { "type": "string", "minLength": 8, "maxLength": 300 }
+      },
+      "required": ["chapterName", "collegeName", "tagline", "contactEmail", "campusLocation", "applicationsOpen", "publicLeaderboardLimit", "hackerRankClubUrl"]
+    },
+    "UserProgress": {
+      "title": "UserProgress",
+      "description": "Per-user completed learning roadmap module IDs.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "completedResourceIds": { "type": "array", "description": "Up to 200 completed resource IDs" }
+      },
+      "required": ["uid", "completedResourceIds"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Verified Paavai member profiles and roles; no status field; reads restricted to owner or Campus Lead."
+    },
+    "/events/{eventId}": {
+      "schema": { "$ref": "#/entities/CampusEvent" },
+      "description": "Campus events; approved events are public, pending/rejected visible to Crew and Lead."
+    },
+    "/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "Campus announcements; approved announcements are public, drafts visible to Crew and Lead."
+    },
+    "/leaderboard/{entryId}": {
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Campus leaderboard standings; manageable by Crew and Lead."
+    },
+    "/resources/{resourceId}": {
+      "schema": { "$ref": "#/entities/LearningResource" },
+      "description": "Learning roadmap tracks; basic modules public, full modules require verified @paavai.edu.in sign-in."
+    },
+    "/gallery/{photoId}": {
+      "schema": { "$ref": "#/entities/GalleryPhoto" },
+      "description": "Event photography gallery; public read, Crew/Lead upload, Lead delete."
+    },
+    "/registrations/{registrationId}": {
+      "schema": { "$ref": "#/entities/EventRegistration" },
+      "description": "Event registrations with student PII; readable by owner, Crew, or Lead."
+    },
+    "/join_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/JoinRequest" },
+      "description": "Public Join Us interest submissions; public create, Lead-only read/update/delete."
+    },
+    "/site_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/SiteSettings" },
+      "description": "Global chapter settings; public read, Lead-only write."
+    },
+    "/user_progress/{userId}": {
+      "schema": { "$ref": "#/entities/UserProgress" },
+      "description": "Private roadmap completion progress per user."
+    }
+  }
+}

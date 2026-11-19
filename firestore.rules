@@ -1,0 +1,370 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ------------------------------------------------------------------------
+    // GLOBAL HELPERS & PRIMITIVES
+    // ------------------------------------------------------------------------
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isBootstrappedAdmin() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string
+        && request.auth.token.email.lower() == 'paavaihackerrank@gmail.com';
+    }
+
+    function isPaavaiEmail() {
+      return request.auth.token.email is string
+        && request.auth.token.email.lower().matches('^[a-z0-9._%+\\-]+@paavai\\.edu\\.in$');
+    }
+
+    // signedIn() requires a verified @paavai.edu.in email (or bootstrapped Campus Lead)
+    function signedIn() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && (isPaavaiEmail() || isBootstrappedAdmin());
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function userDocExists() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isCampusLead() {
+      return isBootstrappedAdmin() || (
+        userDocExists() &&
+        getUserRole() == 'lead'
+      );
+    }
+
+    function isCrewOrLead() {
+      return isCampusLead() || (
+        userDocExists() &&
+        (getUserRole() == 'crew' || getUserRole() == 'lead')
+      );
+    }
+
+    function isValidEmail(val) {
+      return val is string && val.size() >= 5 && val.size() <= 160 && val.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$');
+    }
+
+    function isValidRegNo(val) {
+      return val is string && val.size() >= 4 && val.size() <= 20 && val.matches('^[A-Za-z0-9\\-]+$');
+    }
+
+    function isValidApprovalStatus(val) {
+      return val in ['approved', 'pending', 'rejected'];
+    }
+
+    function isValidTimestampStr(val) {
+      return val is string && val.size() >= 8 && val.size() <= 40;
+    }
+
+    // ------------------------------------------------------------------------
+    // ENTITY VALIDATION BLUEPRINTS
+    // ------------------------------------------------------------------------
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'name', 'regNo', 'department', 'year', 'role'])
+        && data.keys().hasOnly(['uid', 'email', 'name', 'regNo', 'department', 'year', 'role', 'phone', 'hackerRankHandle', 'bio', 'skills', 'joinedAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && isValidEmail(data.email)
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 100
+        && isValidRegNo(data.regNo)
+        && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
+        && data.year is string && data.year.size() >= 2 && data.year.size() <= 20
+        && data.role in ['lead', 'crew', 'member']
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 20))
+        && (!('hackerRankHandle' in data) || (data.hackerRankHandle is string && data.hackerRankHandle.size() <= 60))
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && (!('skills' in data) || (data.skills is list && data.skills.size() <= 12 && (data.skills.size() == 0 || data.skills[0] is string)))
+        && (!('joinedAt' in data) || (data.joinedAt is string && data.joinedAt.size() >= 4 && data.joinedAt.size() <= 30))
+        && (!('updatedAt' in data) || isValidTimestampStr(data.updatedAt));
+    }
+
+    function isValidCampusEvent(data) {
+      return data.keys().hasAll(['title', 'category', 'dateISO', 'venue', 'description', 'membersOnly', 'capacity', 'status', 'createdByUid', 'createdByName', 'createdByRole', 'bannerImage'])
+        && data.keys().hasOnly(['title', 'category', 'dateISO', 'venue', 'description', 'membersOnly', 'capacity', 'status', 'createdByUid', 'createdByName', 'createdByRole', 'bannerImage', 'updatedAt'])
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 140
+        && data.category in ['Contest', 'Workshop', 'Hackathon', 'Bootcamp']
+        && data.dateISO is string && data.dateISO.size() >= 10 && data.dateISO.size() <= 40
+        && data.venue is string && data.venue.size() >= 2 && data.venue.size() <= 160
+        && data.description is string && data.description.size() >= 5 && data.description.size() <= 1000
+        && data.membersOnly is bool
+        && data.capacity is number && data.capacity >= 1 && data.capacity <= 5000
+        && isValidApprovalStatus(data.status)
+        && isValidId(data.createdByUid)
+        && data.createdByName is string && data.createdByName.size() >= 2 && data.createdByName.size() <= 100
+        && data.createdByRole in ['lead', 'crew', 'member', 'outsider']
+        && data.bannerImage is string && data.bannerImage.size() >= 1 && data.bannerImage.size() <= 500;
+    }
+
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll(['title', 'message', 'date', 'priority', 'status', 'createdByUid', 'createdByName'])
+        && data.keys().hasOnly(['title', 'message', 'date', 'priority', 'status', 'createdByUid', 'createdByName', 'updatedAt'])
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 140
+        && data.message is string && data.message.size() >= 5 && data.message.size() <= 1000
+        && data.date is string && data.date.size() >= 8 && data.date.size() <= 30
+        && data.priority in ['Normal', 'Important']
+        && isValidApprovalStatus(data.status)
+        && isValidId(data.createdByUid)
+        && data.createdByName is string && data.createdByName.size() >= 2 && data.createdByName.size() <= 100;
+    }
+
+    function isValidLeaderboardEntry(data) {
+      return data.keys().hasAll(['name', 'registerNumber', 'department', 'year', 'score', 'problemsSolved', 'hackerRankHandle'])
+        && data.keys().hasOnly(['name', 'registerNumber', 'department', 'year', 'score', 'problemsSolved', 'hackerRankHandle', 'updatedAt'])
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 100
+        && isValidRegNo(data.registerNumber)
+        && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
+        && data.year is string && data.year.size() >= 2 && data.year.size() <= 20
+        && data.score is number && data.score >= 0 && data.score <= 1000000
+        && data.problemsSolved is number && data.problemsSolved >= 0 && data.problemsSolved <= 50000
+        && data.hackerRankHandle is string && data.hackerRankHandle.size() >= 1 && data.hackerRankHandle.size() <= 60;
+    }
+
+    function isValidLearningResource(data) {
+      return data.keys().hasAll(['title', 'track', 'level', 'access', 'estimatedHours', 'problemCount', 'summary', 'url', 'topics'])
+        && data.keys().hasOnly(['title', 'track', 'level', 'access', 'estimatedHours', 'problemCount', 'summary', 'url', 'topics'])
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 140
+        && data.track in ['DSA', 'Python', 'Java', 'SQL', 'Problem Solving']
+        && data.level in ['Beginner', 'Intermediate', 'Advanced']
+        && data.access in ['basic', 'full']
+        && data.estimatedHours is number && data.estimatedHours >= 1 && data.estimatedHours <= 500
+        && data.problemCount is number && data.problemCount >= 1 && data.problemCount <= 2000
+        && data.summary is string && data.summary.size() >= 5 && data.summary.size() <= 600
+        && data.url is string && data.url.size() >= 8 && data.url.size() <= 500
+        && data.topics is list && data.topics.size() >= 1 && data.topics.size() <= 10 && data.topics[0] is string;
+    }
+
+    function isValidGalleryPhoto(data) {
+      return data.keys().hasAll(['title', 'category', 'date', 'caption', 'imageUrl', 'uploadedByUid', 'uploadedBy'])
+        && data.keys().hasOnly(['title', 'category', 'date', 'caption', 'imageUrl', 'uploadedByUid', 'uploadedBy'])
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 140
+        && data.category in ['Hackathon', 'Workshop', 'Awards', 'Community']
+        && data.date is string && data.date.size() >= 8 && data.date.size() <= 30
+        && data.caption is string && data.caption.size() >= 3 && data.caption.size() <= 500
+        && data.imageUrl is string && data.imageUrl.size() >= 1 && data.imageUrl.size() <= 500
+        && isValidId(data.uploadedByUid)
+        && data.uploadedBy is string && data.uploadedBy.size() >= 2 && data.uploadedBy.size() <= 100;
+    }
+
+    function isValidRegistration(data) {
+      return data.keys().hasAll(['eventId', 'userId', 'userName', 'userEmail', 'registerNumber', 'department', 'year', 'registeredAt'])
+        && data.keys().hasOnly(['eventId', 'userId', 'userName', 'userEmail', 'registerNumber', 'department', 'year', 'registeredAt'])
+        && isValidId(data.eventId)
+        && isValidId(data.userId)
+        && data.userName is string && data.userName.size() >= 2 && data.userName.size() <= 100
+        && isValidEmail(data.userEmail)
+        && isValidRegNo(data.registerNumber)
+        && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
+        && data.year is string && data.year.size() >= 2 && data.year.size() <= 20
+        && data.registeredAt is string && data.registeredAt.size() >= 8 && data.registeredAt.size() <= 40;
+    }
+
+    function isValidJoinRequest(data) {
+      return data.keys().hasAll(['name', 'registerNumber', 'department', 'year', 'email', 'phone', 'skills', 'submittedAt', 'status'])
+        && data.keys().hasOnly(['name', 'registerNumber', 'department', 'year', 'email', 'phone', 'skills', 'submittedAt', 'status'])
+        && data.name is string && data.name.size() >= 3 && data.name.size() <= 100
+        && isValidRegNo(data.registerNumber)
+        && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
+        && data.year is string && data.year.size() >= 2 && data.year.size() <= 20
+        && isValidEmail(data.email)
+        && data.phone is string && data.phone.size() >= 8 && data.phone.size() <= 20
+        && data.skills is string && data.skills.size() >= 2 && data.skills.size() <= 400
+        && data.submittedAt is string && data.submittedAt.size() >= 8 && data.submittedAt.size() <= 30
+        && isValidApprovalStatus(data.status);
+    }
+
+    function isValidSiteSettings(data) {
+      return data.keys().hasAll(['chapterName', 'collegeName', 'tagline', 'contactEmail', 'campusLocation', 'applicationsOpen', 'publicLeaderboardLimit', 'hackerRankClubUrl'])
+        && data.keys().hasOnly(['chapterName', 'collegeName', 'tagline', 'contactEmail', 'campusLocation', 'applicationsOpen', 'publicLeaderboardLimit', 'hackerRankClubUrl', 'updatedAt'])
+        && data.chapterName is string && data.chapterName.size() >= 2 && data.chapterName.size() <= 100
+        && data.collegeName is string && data.collegeName.size() >= 2 && data.collegeName.size() <= 120
+        && data.tagline is string && data.tagline.size() >= 2 && data.tagline.size() <= 120
+        && isValidEmail(data.contactEmail)
+        && data.campusLocation is string && data.campusLocation.size() >= 4 && data.campusLocation.size() <= 200
+        && data.applicationsOpen is bool
+        && data.publicLeaderboardLimit is number && data.publicLeaderboardLimit >= 3 && data.publicLeaderboardLimit <= 50
+        && data.hackerRankClubUrl is string && data.hackerRankClubUrl.size() >= 8 && data.hackerRankClubUrl.size() <= 300;
+    }
+
+    // ------------------------------------------------------------------------
+    // COLLECTION MATCH BLOCKS
+    // ------------------------------------------------------------------------
+
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // Users (verified @paavai.edu.in; no status field; users cannot change own role)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isCampusLead());
+      allow list: if isCampusLead() || (signedIn() && existing().uid == request.auth.uid);
+
+      allow create: if signedIn() && isValidId(userId) && isValidUserProfile(incoming()) && (
+        isCampusLead() ||
+        (isOwner(userId) && incoming().uid == request.auth.uid && incoming().email.lower() == request.auth.token.email.lower() && (
+          (isBootstrappedAdmin() && incoming().role == 'lead') ||
+          incoming().role == 'member'
+        ))
+      );
+
+      allow update: if signedIn() && isValidId(userId) && isValidUserProfile(incoming()) && (
+        (
+          isCampusLead() &&
+          incoming().uid == existing().uid &&
+          incoming().email == existing().email &&
+          (request.auth.uid != userId || incoming().role == existing().role) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'name', 'regNo', 'department', 'year', 'phone', 'hackerRankHandle', 'bio', 'skills', 'updatedAt'])
+        ) ||
+        (
+          isOwner(userId) &&
+          incoming().uid == existing().uid &&
+          incoming().email == existing().email &&
+          incoming().role == existing().role &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'regNo', 'department', 'year', 'phone', 'hackerRankHandle', 'bio', 'skills', 'updatedAt'])
+        )
+      );
+
+      allow delete: if isValidId(userId) && isCampusLead() && request.auth.uid != userId;
+    }
+
+    // Events (Approved = public; Pending/Rejected = Crew & Lead; Edit/Delete/Approve = Lead)
+    match /events/{eventId} {
+      allow get: if isValidId(eventId) && (existing().status == 'approved' || isCrewOrLead());
+      allow list: if existing().status == 'approved' || isCrewOrLead();
+
+      allow create: if signedIn() && isValidId(eventId) && isValidCampusEvent(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && (
+          isCampusLead() ||
+          (isCrewOrLead() && incoming().status == 'pending')
+        );
+
+      allow update: if isValidId(eventId) && isCampusLead() && isValidCampusEvent(incoming())
+        && incoming().createdByUid == existing().createdByUid;
+
+      allow delete: if isValidId(eventId) && isCampusLead();
+    }
+
+    // Announcements
+    match /announcements/{announcementId} {
+      allow get: if isValidId(announcementId) && (existing().status == 'approved' || isCrewOrLead());
+      allow list: if existing().status == 'approved' || isCrewOrLead();
+
+      allow create: if signedIn() && isValidId(announcementId) && isValidAnnouncement(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && (
+          isCampusLead() ||
+          (isCrewOrLead() && incoming().status == 'pending')
+        );
+
+      allow update: if isValidId(announcementId) && isCampusLead() && isValidAnnouncement(incoming())
+        && incoming().createdByUid == existing().createdByUid;
+
+      allow delete: if isValidId(announcementId) && isCampusLead();
+    }
+
+    // Leaderboard
+    match /leaderboard/{entryId} {
+      allow get: if isValidId(entryId);
+      allow list: if true;
+      allow create, update: if isValidId(entryId) && isCrewOrLead() && isValidLeaderboardEntry(incoming());
+      allow delete: if isValidId(entryId) && isCrewOrLead();
+    }
+
+    // Learning Resources (Basic = public; Full = verified signedIn() members)
+    match /resources/{resourceId} {
+      allow get: if isValidId(resourceId) && (existing().access == 'basic' || signedIn());
+      allow list: if existing().access == 'basic' || signedIn();
+      allow create, update: if isValidId(resourceId) && isCrewOrLead() && isValidLearningResource(incoming());
+      allow delete: if isValidId(resourceId) && isCrewOrLead();
+    }
+
+    // Gallery
+    match /gallery/{photoId} {
+      allow get: if isValidId(photoId);
+      allow list: if true;
+      allow create: if isValidId(photoId) && isCrewOrLead() && isValidGalleryPhoto(incoming())
+        && incoming().uploadedByUid == request.auth.uid;
+      allow update: if isValidId(photoId) && isCampusLead() && isValidGalleryPhoto(incoming());
+      allow delete: if isValidId(photoId) && isCampusLead();
+    }
+
+    // Event Registrations (No user status check; verified signedIn() users register immediately)
+    match /registrations/{registrationId} {
+      allow get: if isValidId(registrationId) && (
+        isCrewOrLead() || (signedIn() && existing().userId == request.auth.uid)
+      );
+      allow list: if isCrewOrLead() || (signedIn() && existing().userId == request.auth.uid);
+
+      allow create: if signedIn() && isValidId(registrationId) && isValidRegistration(incoming())
+        && incoming().userId == request.auth.uid
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.status == 'approved';
+
+      allow delete: if isValidId(registrationId) && (
+        isCampusLead() || (signedIn() && existing().userId == request.auth.uid)
+      );
+    }
+
+    // Public Join Requests
+    match /join_requests/{requestId} {
+      allow get: if isValidId(requestId) && isCampusLead();
+      allow list: if isCampusLead();
+
+      allow create: if isValidId(requestId) && isValidJoinRequest(incoming())
+        && incoming().status == 'pending';
+
+      allow update: if isValidId(requestId) && isCampusLead() && isValidJoinRequest(incoming())
+        && existing().status == 'pending'
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+
+      allow delete: if isValidId(requestId) && isCampusLead();
+    }
+
+    // Site Settings
+    match /site_settings/{settingId} {
+      allow get: if isValidId(settingId);
+      allow list: if true;
+      allow create, update: if isValidId(settingId) && isCampusLead() && isValidSiteSettings(incoming());
+      allow delete: if false;
+    }
+
+    // Per-user Roadmap Progress
+    match /user_progress/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if signedIn() && existing().uid == request.auth.uid;
+      allow create, update: if isValidId(userId) && isOwner(userId)
+        && incoming().keys().hasAll(['uid', 'completedResourceIds'])
+        && incoming().keys().hasOnly(['uid', 'completedResourceIds', 'updatedAt'])
+        && incoming().uid == request.auth.uid
+        && incoming().completedResourceIds is list
+        && incoming().completedResourceIds.size() <= 200
+        && (incoming().completedResourceIds.size() == 0 || incoming().completedResourceIds[0] is string);
+      allow delete: if isValidId(userId) && isOwner(userId);
+    }
+  }
+}
