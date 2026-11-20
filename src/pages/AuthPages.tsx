@@ -4,6 +4,7 @@ import { MailCheck } from 'lucide-react';
 import { ACADEMIC_YEARS, DEPARTMENTS, getDashboardPath } from '../config/rbacAndData';
 import { isAllowedCollegeEmail, useApp } from '../context/AppContext';
 import { NotificationBanner } from '../components/NotificationBanner';
+import { ForgotPassword } from '../components/ForgotPassword';
 
 export const LoginPage: React.FC = () => {
   const {
@@ -13,7 +14,6 @@ export const LoginPage: React.FC = () => {
     needsEmailVerification,
     unverifiedEmail,
     login,
-    sendPasswordReset,
   } = useApp();
   const navigate = useNavigate();
 
@@ -21,8 +21,6 @@ export const LoginPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [resetMode, setResetMode] = useState(false);
-  const [resetEmail, setResetEmail] = useState('');
-  const [resetSuccess, setResetSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -53,28 +51,6 @@ export const LoginPage: React.FC = () => {
       return;
     }
     navigate(res.redirectPath || '/dashboard/member', { replace: true });
-  };
-
-  const handlePasswordReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const targetEmail = resetEmail.trim();
-    if (!targetEmail || !isAllowedCollegeEmail(targetEmail)) {
-      setError('Enter your registered @paavai.edu.in email address.');
-      setResetSuccess('');
-      return;
-    }
-    setSubmitting(true);
-    setError('');
-    setResetSuccess('');
-    const res = await sendPasswordReset(targetEmail);
-    setSubmitting(false);
-    if (!res.ok) {
-      setError(res.error || 'Could not send password reset email.');
-      return;
-    }
-    setResetSuccess(
-      `Password reset link sent to ${targetEmail.toLowerCase()}. Check your inbox and Spam/Promotions folder.`
-    );
   };
 
   return (
@@ -109,24 +85,17 @@ export const LoginPage: React.FC = () => {
             Firebase Authentication · Paavai Chapter
           </p>
           <h1 className="font-mono text-2xl font-bold text-slate-900 dark:text-white">
-            {resetMode ? 'Reset Your Password' : 'Sign in to HRCC Paavai'}
+            {resetMode ? 'Recover Account Access' : 'Sign in to HRCC Paavai'}
           </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {resetMode ? (
-              <>
-                Enter your registered <strong>@paavai.edu.in</strong> email and we will send you a
-                Firebase password reset link.
-              </>
-            ) : (
-              <>
-                Sign in with your verified <strong>@paavai.edu.in</strong> college email to open your
-                dashboard immediately.
-              </>
-            )}
-          </p>
+          {!resetMode && (
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Sign in with your verified <strong>@paavai.edu.in</strong> college email to open your
+              dashboard immediately.
+            </p>
+          )}
         </div>
 
-        {error && (
+        {!resetMode && error && (
           <div
             role="alert"
             className="p-3 rounded-lg text-xs font-medium bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 leading-relaxed"
@@ -135,55 +104,14 @@ export const LoginPage: React.FC = () => {
           </div>
         )}
 
-        {resetSuccess && (
-          <div
-            role="status"
-            className="p-3 rounded-lg text-xs font-medium bg-[#00EA64]/10 border border-[#00EA64]/30 text-[#009942] dark:text-[#00EA64] leading-relaxed"
-          >
-            {resetSuccess}
-          </div>
-        )}
-
         {resetMode ? (
-          <form onSubmit={handlePasswordReset} noValidate className="space-y-4">
-            <div>
-              <label
-                htmlFor="reset-email"
-                className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1.5"
-              >
-                Registered Paavai Email
-              </label>
-              <input
-                id="reset-email"
-                type="email"
-                autoComplete="email"
-                value={resetEmail}
-                onChange={(e) => setResetEmail(e.target.value)}
-                placeholder="student@paavai.edu.in"
-                className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60"
-            >
-              {submitting ? 'Sending Reset Link...' : 'Send Password Reset Email'}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setResetMode(false);
-                setError('');
-                setResetSuccess('');
-              }}
-              className="w-full py-2 text-xs font-mono text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
-            >
-              ← Back to Sign In
-            </button>
-          </form>
+          <ForgotPassword
+            initialEmail={email}
+            onBackToLogin={() => {
+              setResetMode(false);
+              setError('');
+            }}
+          />
         ) : (
           <form onSubmit={handleSubmit} noValidate className="space-y-4">
             <div>
@@ -215,9 +143,7 @@ export const LoginPage: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setResetMode(true);
-                    setResetEmail(email);
                     setError('');
-                    setResetSuccess('');
                   }}
                   className="text-xs font-mono text-[#009942] dark:text-[#00EA64] hover:underline"
                 >

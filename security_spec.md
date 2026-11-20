@@ -1,7 +1,7 @@
 # Firestore Security Specification (Updated)
 
 ## 1. Data Invariants
-1. **Verified Institutional Access (`signedIn()`)**: `signedIn()` requires `request.auth != null`, `request.auth.token.email_verified == true`, and a `@paavai.edu.in` email address (or the bootstrapped Campus Lead `paavaihackerrank@gmail.com`).
+1. **Verified Institutional Access (`signedIn()`)**: `signedIn()` requires `request.auth != null`, `request.auth.token.email_verified == true`, and a `@paavai.edu.in` email address (or bootstrapped Campus Lead `622123104144@paavai.edu.in` / `paavaihackerrank@gmail.com`).
 2. **Immediate Member Provisioning (No User Status Gate)**: On first verified login, `/users/{uid}` is created with `role: 'member'`, `regNo`, `department`, `year`, `name`, and `email`—with no `status` field.
 3. **Immutable Self-Role**: Users can edit their own profile fields (`name`, `regNo`, `department`, `year`, `phone`, `hackerRankHandle`, `bio`, `skills`), but NEVER their own `role`. Only a `lead` can promote `member` → `crew` or demote `crew` → `member`.
 4. **Approval Gate for Crew Content**: `crew` members creating `/events/{id}` or `/announcements/{id}` MUST submit `status == 'pending'`. Only `lead` can set `status == 'approved'` or `'rejected'`.

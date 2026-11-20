@@ -8,7 +8,9 @@ import React, {
   useState,
 } from 'react';
 import {
+  ActionCodeSettings,
   User as FirebaseUser,
+  applyActionCode,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
   reload,
@@ -50,11 +52,11 @@ import {
   hasPermission,
 } from '../config/rbacAndData';
 import {
-  BOOTSTRAPPED_ADMIN_EMAIL,
   OperationType,
   auth,
   db,
   handleFirestoreError,
+  isBootstrappedAdminEmail,
 } from '../lib/firebase';
 
 export type ToastVariant = 'success' | 'error' | 'info';
@@ -110,8 +112,14 @@ interface AppContextValue {
   login: (email: string, password: string) => Promise<AuthActionResult>;
   signup: (payload: SignupPayload) => Promise<AuthActionResult>;
   sendPasswordReset: (email: string) => Promise<{ ok: boolean; error?: string }>;
-  resendVerificationEmail: () => Promise<{ ok: boolean; error?: string }>;
+  resendVerificationEmail: () => Promise<{ ok: boolean; error?: string; rateLimited?: boolean }>;
   refreshEmailVerification: () => Promise<AuthActionResult>;
+  verifyActionCode: (oobCode: string) => Promise<AuthActionResult>;
+  syncVerificationAfterRedirect: () => Promise<{
+    verified: boolean;
+    role?: Exclude<UserRole, 'outsider'>;
+    redirectPath?: string;
+  }>;
   logout: () => Promise<void>;
 
   // Live Firestore Data Collections
@@ -197,12 +205,52 @@ const ensureMinLen = (val: string, fallback: string, minLen: number, maxLen: num
 const sanitizeId = (raw: string) =>
   raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128) || `id_${Date.now()}`;
 
+const RESEND_COOLDOWN_MS = 60_000;
+
+export function getResendCooldownStorageKey(email?: string | null): string {
+  return `hrcc_verify_resend_until_${(email || 'current').trim().toLowerCase()}`;
+}
+
+export function setResendCooldownTimestamp(email?: string | null, durationMs = RESEND_COOLDOWN_MS) {
+  try {
+    localStorage.setItem(getResendCooldownStorageKey(email), String(Date.now() + durationMs));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+async function sendVerificationWithRedirect(user: FirebaseUser): Promise<void> {
+  auth.useDeviceLanguage();
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const actionCodeSettings: ActionCodeSettings = {
+      url: `${window.location.origin}/verified?verified=true`,
+      handleCodeInApp: false,
+    };
+    try {
+      await sendEmailVerification(user, actionCodeSettings);
+      return;
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      if (
+        code === 'auth/unauthorized-continue-uri' ||
+        code === 'auth/invalid-continue-uri' ||
+        code === 'auth/missing-continue-uri'
+      ) {
+        await sendEmailVerification(user);
+        return;
+      }
+      throw err;
+    }
+  }
+  await sendEmailVerification(user);
+}
+
 export function isAllowedCollegeEmail(email?: string | null): boolean {
   if (!email) return false;
   const lower = email.trim().toLowerCase();
   return (
     /^[a-z0-9._%+\-]+@paavai\.edu\.in$/.test(lower) ||
-    lower === BOOTSTRAPPED_ADMIN_EMAIL
+    isBootstrappedAdminEmail(lower)
   );
 }
 
@@ -373,18 +421,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const userRef = doc(db, 'users', fbUser.uid);
       try {
         const snap = await getDoc(userRef);
+        const isBootAdmin =
+          isBootstrappedAdminEmail(fbUser.email) && fbUser.emailVerified;
+
         if (snap.exists()) {
           const data = snap.data();
           clearPendingMeta(fbUser.uid);
-          if (data.emailVerified === false) {
+          const shouldPromoteToLead = isBootAdmin && data.role !== 'lead';
+          if (data.emailVerified === false || shouldPromoteToLead) {
             await updateDoc(userRef, {
+              ...(shouldPromoteToLead ? { role: 'lead' } : {}),
               emailVerified: true,
               updatedAt: new Date().toISOString(),
             });
           }
           const rawRole = data.role as Exclude<UserRole, 'outsider'>;
-          const resolvedRole: Exclude<UserRole, 'outsider'> =
-            rawRole === 'lead' || rawRole === 'crew' ? rawRole : 'member';
+          const resolvedRole: Exclude<UserRole, 'outsider'> = isBootAdmin
+            ? 'lead'
+            : rawRole === 'lead' || rawRole === 'crew'
+              ? rawRole
+              : 'member';
 
           if (resolvedRole === 'lead' || resolvedRole === 'crew') {
             await setDoc(
@@ -404,19 +460,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return resolvedRole;
         }
 
-        const isBootAdmin =
-          fbUser.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL &&
-          fbUser.emailVerified;
         const pending = readPendingMeta(fbUser.uid);
         const assignedRole: Exclude<UserRole, 'outsider'> = isBootAdmin ? 'lead' : 'member';
         const nowISO = new Date().toISOString();
+        const emailPrefix = (fbUser.email || '').split('@')[0];
+        const defaultLeadRegNo = /^\d{6,}$/.test(emailPrefix) ? emailPrefix : '622123104144';
 
         const newProfileDoc = {
           uid: fbUser.uid,
           email: clampStr((fbUser.email || '').toLowerCase(), 160),
-          name: ensureMinLen(pending?.name || fbUser.displayName || 'Paavai Student', 'Paavai Student', 2, 100),
+          name: ensureMinLen(pending?.name || fbUser.displayName || (isBootAdmin ? 'Campus Lead' : 'Paavai Student'), 'Paavai Student', 2, 100),
           regNo: clampStr(
-            (pending?.regNo || (isBootAdmin ? '622123104012' : 'PEC-MEMBER')).toUpperCase(),
+            (pending?.regNo || (isBootAdmin ? defaultLeadRegNo : 'PEC-MEMBER')).toUpperCase(),
             20
           ),
           department: ensureMinLen(pending?.department || 'CSE', 'CSE', 2, 40),
@@ -561,7 +616,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const isRealCampusLead = Boolean(
     isVerifiedAllowedUser &&
-      (firebaseUser?.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL ||
+      (isBootstrappedAdminEmail(firebaseUser?.email) ||
         firebaseProfile?.role === 'lead')
   );
 
@@ -1036,10 +1091,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const currentRole: UserRole = useMemo(() => {
     if (!isVerifiedAllowedUser) return 'outsider';
-    if (firebaseProfile) return firebaseProfile.role;
-    if (firebaseUser?.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL) {
+    if (isBootstrappedAdminEmail(firebaseUser?.email)) {
       return 'lead';
     }
+    if (firebaseProfile) return firebaseProfile.role;
     return 'member';
   }, [firebaseProfile, firebaseUser, isVerifiedAllowedUser]);
 
@@ -1114,12 +1169,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       let emailSent = false;
       let emailErrorMsg = '';
       try {
-        auth.useDeviceLanguage();
-        await sendEmailVerification(cred.user);
+        await sendVerificationWithRedirect(cred.user);
         emailSent = true;
+        setResendCooldownTimestamp(trimmedEmail);
       } catch (mailErr: unknown) {
         console.error('Failed to send initial verification email:', mailErr);
         const mailCode = (mailErr as { code?: string })?.code || '';
+        if (mailCode === 'auth/too-many-requests') {
+          setResendCooldownTimestamp(trimmedEmail);
+        }
         emailErrorMsg =
           mailCode === 'auth/too-many-requests'
             ? 'Too many verification requests. Please wait a few minutes and try again.'
@@ -1210,6 +1268,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
     try {
+      auth.useDeviceLanguage();
       await sendPasswordResetEmail(auth, trimmedEmail);
       addToast(
         'Password reset email sent',
@@ -1219,19 +1278,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { ok: true };
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code || '';
-      if (code === 'auth/user-not-found') {
-        return { ok: false, error: 'No account found with this email address.' };
-      }
-      if (code === 'auth/invalid-email') {
-        return { ok: false, error: 'Enter a valid @paavai.edu.in email address.' };
-      }
-      if (code === 'auth/too-many-requests') {
-        return { ok: false, error: 'Too many requests. Please wait a few minutes and try again.' };
-      }
-      return {
-        ok: false,
-        error: err instanceof Error ? err.message : 'Could not send password reset email.',
-      };
+      const errMsg =
+        code === 'auth/user-not-found'
+          ? 'No account found with this email address.'
+          : code === 'auth/invalid-email'
+            ? 'Enter a valid @paavai.edu.in email address.'
+            : code === 'auth/too-many-requests'
+              ? 'Too many requests. Please wait a few minutes and try again.'
+              : err instanceof Error
+                ? err.message
+                : 'Could not send password reset email.';
+      addToast('Password reset failed', errMsg, 'error');
+      return { ok: false, error: errMsg };
     }
   };
 
@@ -1242,8 +1300,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { ok: false, error: msg };
     }
     try {
-      auth.useDeviceLanguage();
-      await sendEmailVerification(auth.currentUser);
+      await sendVerificationWithRedirect(auth.currentUser);
+      setResendCooldownTimestamp(auth.currentUser.email);
       addToast(
         'Verification email sent',
         `A verification link has been sent to ${auth.currentUser.email}. Check your inbox (including Spam/Promotions).`,
@@ -1252,16 +1310,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { ok: true };
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code || '';
-      const errMsg =
-        code === 'auth/too-many-requests'
-          ? 'Too many verification requests. Please wait a few minutes before trying again.'
-          : err instanceof Error
-            ? err.message
-            : 'Could not resend verification email.';
+      const rateLimited = code === 'auth/too-many-requests';
+      if (rateLimited) {
+        setResendCooldownTimestamp(auth.currentUser.email);
+      }
+      const errMsg = rateLimited
+        ? 'Too many verification requests. Please wait 60 seconds before trying again.'
+        : err instanceof Error
+          ? err.message
+          : 'Could not resend verification email.';
       addToast('Failed to send verification email', errMsg, 'error');
       return {
         ok: false,
         error: errMsg,
+        rateLimited,
       };
     }
   };
@@ -1297,6 +1359,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ok: false,
         error: err instanceof Error ? err.message : 'Could not verify status.',
       };
+    }
+  };
+
+  const verifyActionCode = async (oobCode: string): Promise<AuthActionResult> => {
+    try {
+      await applyActionCode(auth, oobCode);
+      if (auth.currentUser) {
+        await reload(auth.currentUser);
+        await auth.currentUser.getIdToken(true);
+        const refreshed = auth.currentUser;
+        setFirebaseUser(refreshed);
+        if (refreshed.emailVerified && isAllowedCollegeEmail(refreshed.email)) {
+          const role = await ensureUserProfile(refreshed);
+          return { ok: true, role, redirectPath: getDashboardPath(role) };
+        }
+      }
+      return { ok: true };
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      const errMsg =
+        code === 'auth/expired-action-code'
+          ? 'This verification link has expired. Request a new verification email.'
+          : code === 'auth/invalid-action-code'
+            ? 'This verification link is invalid or has already been used.'
+            : err instanceof Error
+              ? err.message
+              : 'Could not verify your email link.';
+      return { ok: false, error: errMsg };
+    }
+  };
+
+  const syncVerificationAfterRedirect = async (): Promise<{
+    verified: boolean;
+    role?: Exclude<UserRole, 'outsider'>;
+    redirectPath?: string;
+  }> => {
+    if (!auth.currentUser) {
+      return { verified: true };
+    }
+    try {
+      await reload(auth.currentUser);
+      await auth.currentUser.getIdToken(true);
+      const refreshed = auth.currentUser;
+      setFirebaseUser(refreshed);
+      if (refreshed.emailVerified && isAllowedCollegeEmail(refreshed.email)) {
+        const role = await ensureUserProfile(refreshed);
+        return { verified: true, role, redirectPath: getDashboardPath(role) };
+      }
+      return { verified: refreshed.emailVerified };
+    } catch {
+      return { verified: Boolean(auth.currentUser?.emailVerified) };
     }
   };
 
@@ -1914,6 +2027,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         sendPasswordReset,
         resendVerificationEmail,
         refreshEmailVerification,
+        verifyActionCode,
+        syncVerificationAfterRedirect,
         logout,
         siteSettings,
         users,

@@ -18,6 +18,8 @@ import { ProfilePage } from './pages/ProfilePage';
 import { ContactFaqPage } from './pages/ContactFaqPage';
 import { LoginPage, SignUpPage } from './pages/AuthPages';
 import { AccessDeniedPage } from './pages/AccessDeniedPage';
+import { EmailVerifiedPage } from './pages/EmailVerifiedPage';
+import { WelcomeOnboardingHandler } from './components/WelcomeOnboardingHandler';
 
 const ScrollToTop: React.FC = () => {
   const { pathname } = useLocation();
@@ -42,6 +44,7 @@ export default function App() {
       <BrowserRouter>
         <AppProvider>
           <ScrollToTop />
+          <WelcomeOnboardingHandler />
           <Layout>
             <Routes>
               {/* Public Pages */}
@@ -57,6 +60,8 @@ export default function App() {
               {/* Authentication & Access Denied */}
               <Route path="/login" element={<LoginPage />} />
               <Route path="/signup" element={<SignUpPage />} />
+              <Route path="/verified" element={<EmailVerifiedPage />} />
+              <Route path="/verify-email" element={<EmailVerifiedPage />} />
               <Route path="/access-denied" element={<AccessDeniedPage />} />
 
               {/* Protected: All Verified Logged-In Roles (pending users see verification banner) */}

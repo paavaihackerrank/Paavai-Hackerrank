@@ -1,6 +1,10 @@
-import React, { useState } from 'react';
-import { AlertTriangle, Mail, RefreshCw } from 'lucide-react';
-import { useApp } from '../context/AppContext';
+import React, { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, Clock, Mail, RefreshCw } from 'lucide-react';
+import {
+  getResendCooldownStorageKey,
+  setResendCooldownTimestamp,
+  useApp,
+} from '../context/AppContext';
 
 export interface NotificationBannerUser {
   email?: string | null;
@@ -13,10 +17,25 @@ interface NotificationBannerProps {
   compact?: boolean;
 }
 
+const COOLDOWN_SECONDS = 60;
+
+function readRemainingSeconds(email?: string | null): number {
+  try {
+    const raw = localStorage.getItem(getResendCooldownStorageKey(email));
+    if (!raw) return 0;
+    const targetMs = Number(raw);
+    if (!Number.isFinite(targetMs)) return 0;
+    const diff = Math.ceil((targetMs - Date.now()) / 1000);
+    return diff > 0 ? diff : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Persistent high-visibility warning banner shown when a signed-up user's
  * `emailVerified` flag is `false`, prompting them to check their inbox for
- * activation instructions.
+ * activation instructions. Includes a 60s cooldown on resending verification emails.
  */
 export const NotificationBanner: React.FC<NotificationBannerProps> = ({
   user,
@@ -31,13 +50,36 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
   const [error, setError] = useState('');
 
   const targetUser = user !== undefined ? user : (firebaseUser ?? currentUser);
+  const targetEmail = targetUser?.email || '';
+
+  const [cooldownSeconds, setCooldownSeconds] = useState<number>(() =>
+    readRemainingSeconds(targetEmail)
+  );
+
+  const syncCooldown = useCallback(() => {
+    setCooldownSeconds(readRemainingSeconds(targetEmail));
+  }, [targetEmail]);
+
+  useEffect(() => {
+    syncCooldown();
+    const timer = window.setInterval(() => {
+      const remaining = readRemainingSeconds(targetEmail);
+      setCooldownSeconds(remaining);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [targetEmail, syncCooldown]);
 
   if (!targetUser || targetUser.emailVerified !== false) {
     return null;
   }
 
-  const email = targetUser.email || 'your @paavai.edu.in email';
+  const email = targetEmail || 'your @paavai.edu.in email';
   const busy = checking || resending;
+  const isCoolingDown = cooldownSeconds > 0;
+  const cooldownProgress = Math.min(
+    100,
+    Math.max(0, Math.round(((COOLDOWN_SECONDS - cooldownSeconds) / COOLDOWN_SECONDS) * 100))
+  );
 
   const handleCheckVerified = async () => {
     setChecking(true);
@@ -55,15 +97,19 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
   };
 
   const handleResend = async () => {
+    if (isCoolingDown || busy) return;
     setResending(true);
     setError('');
     setMessage('');
     const res = await resendVerificationEmail();
     setResending(false);
     if (!res.ok) {
+      syncCooldown();
       setError(res.error || 'Could not resend verification email.');
       return;
     }
+    setResendCooldownTimestamp(targetEmail, COOLDOWN_SECONDS * 1000);
+    setCooldownSeconds(COOLDOWN_SECONDS);
     setMessage(`A fresh verification link has been sent to ${email}. Please check your inbox.`);
   };
 
@@ -110,6 +156,26 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
         </div>
       )}
 
+      {isCoolingDown && (
+        <div className="space-y-1.5" aria-live="polite">
+          <div className="flex items-center justify-between gap-2 text-xs font-mono text-amber-800 dark:text-amber-200">
+            <span className="inline-flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                Please wait <strong>{cooldownSeconds}s</strong> before requesting another email
+              </span>
+            </span>
+            <span className="tabular-nums">{cooldownSeconds}s</span>
+          </div>
+          <div className="h-1.5 w-full rounded-full bg-amber-500/20 overflow-hidden">
+            <div
+              className="h-full bg-amber-500 transition-[width] duration-700 ease-linear"
+              style={{ width: `${cooldownProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2.5">
         <button
           type="button"
@@ -123,12 +189,19 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
 
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || isCoolingDown}
           onClick={handleResend}
-          className="py-2.5 px-4 rounded-lg text-xs font-medium border border-amber-500/40 bg-white/90 dark:bg-[#121821] text-slate-800 dark:text-slate-200 hover:border-[#00EA64] transition-colors disabled:opacity-60 inline-flex items-center gap-1.5"
+          aria-disabled={busy || isCoolingDown}
+          className="py-2.5 px-4 rounded-lg text-xs font-medium border border-amber-500/40 bg-white/90 dark:bg-[#121821] text-slate-800 dark:text-slate-200 hover:border-[#00EA64] transition-colors disabled:opacity-55 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
         >
           <Mail className="w-3.5 h-3.5" aria-hidden="true" />
-          <span>{resending ? 'Sending...' : 'Resend Verification Email'}</span>
+          <span className="tabular-nums">
+            {resending
+              ? 'Sending...'
+              : isCoolingDown
+                ? `Resend Verification Email (${cooldownSeconds}s)`
+                : 'Resend Verification Email'}
+          </span>
         </button>
 
         <button

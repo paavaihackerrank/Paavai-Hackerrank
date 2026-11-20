@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { ROLE_META } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
+import { DsaProgressBar } from '../components/DsaProgressBar';
 
 export const MemberDashboardPage: React.FC = () => {
   const {
@@ -20,6 +21,7 @@ export const MemberDashboardPage: React.FC = () => {
     resources,
     registrations,
     completedResourceIds,
+    toggleResourceCompleted,
     cancelRegistration,
   } = useApp();
 
@@ -116,6 +118,13 @@ export const MemberDashboardPage: React.FC = () => {
           </Link>
         </div>
       </section>
+
+      {/* DSA Roadmap Completion Progress */}
+      <DsaProgressBar
+        resources={resources}
+        completedResourceIds={completedResourceIds}
+        onToggleCompleted={toggleResourceCompleted}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* My Registrations */}

@@ -25,7 +25,7 @@ service cloud.firestore {
       return request.auth != null
         && request.auth.token.email_verified == true
         && request.auth.token.email is string
-        && request.auth.token.email.lower() == 'paavaihackerrank@gmail.com';
+        && request.auth.token.email.lower() in ['622123104144@paavai.edu.in', 'paavaihackerrank@gmail.com'];
     }
 
     function isPaavaiEmail() {
@@ -270,6 +270,15 @@ service cloud.firestore {
       );
 
       allow update: if signedIn() && isValidId(userId) && isValidUserProfile(incoming()) && (
+        (
+          isBootstrappedAdmin() &&
+          request.auth.uid == userId &&
+          incoming().uid == existing().uid &&
+          incoming().email == existing().email &&
+          incoming().role == 'lead' &&
+          (!('emailVerified' in incoming()) || incoming().emailVerified == true) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'emailVerified', 'updatedAt'])
+        ) ||
         (
           isCampusLead() &&
           incoming().uid == existing().uid &&

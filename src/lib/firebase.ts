@@ -32,7 +32,17 @@ isSupported()
 export const db = getFirestore(app, firebaseAppletConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 
-export const BOOTSTRAPPED_ADMIN_EMAIL = 'paavaihackerrank@gmail.com';
+export const CAMPUS_LEAD_EMAIL = '622123104144@paavai.edu.in';
+export const BOOTSTRAPPED_ADMIN_EMAIL = CAMPUS_LEAD_EMAIL;
+export const BOOTSTRAPPED_ADMIN_EMAILS = [
+  CAMPUS_LEAD_EMAIL,
+  'paavaihackerrank@gmail.com',
+] as const;
+
+export function isBootstrappedAdminEmail(email?: string | null): boolean {
+  const lower = (email || '').trim().toLowerCase();
+  return (BOOTSTRAPPED_ADMIN_EMAILS as readonly string[]).includes(lower);
+}
 
 export enum OperationType {
   CREATE = 'create',
