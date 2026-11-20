@@ -1,0 +1,286 @@
+import React, { useMemo } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  Award,
+  Code2,
+  ExternalLink,
+  Github,
+  Linkedin,
+  Sparkles,
+  Trophy,
+} from 'lucide-react';
+import { useApp } from '../context/AppContext';
+
+interface SpotlightCandidate {
+  key: string;
+  name: string;
+  department: string;
+  year: string;
+  bio: string;
+  designation?: string;
+  hackerRankHandle?: string;
+  hackerRankUrl?: string;
+  githubUrl?: string;
+  linkedinUrl?: string;
+  rank?: number;
+  score?: number;
+  problemsSolved?: number;
+  completedDsaCount?: number;
+  completedRoadmapCount?: number;
+  skills: string[];
+}
+
+const normalize = (v?: string) => (v || '').trim().toLowerCase().replace(/^@/, '');
+
+function getWeekNumber(now = new Date()): number {
+  const startOfYear = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+  const diffDays = Math.floor((now.getTime() - startOfYear.getTime()) / 86_400_000);
+  return Math.floor(diffDays / 7) + now.getUTCFullYear() * 53;
+}
+
+/**
+ * Weekly Member Spotlight component on HomePage that dynamically selects and
+ * highlights a community member each week from live Firestore data, showcasing
+ * their leaderboard achievements, completed roadmap modules, and social links.
+ */
+export const MemberSpotlight: React.FC = () => {
+  const { publicProfiles, leaderboard, teamMembers, resources } = useApp();
+
+  const totalDsaModules = resources.filter((r) => r.track === 'DSA').length;
+
+  const { spotlight, totalCandidates } = useMemo(() => {
+    const sortedLb = [...leaderboard].sort((a, b) => b.score - a.score);
+    const map = new Map<string, SpotlightCandidate>();
+
+    // 1. Seed from non-PII public_profiles (includes roadmap counts + social links)
+    publicProfiles.forEach((p) => {
+      const key = normalize(p.hackerRankHandle) || p.uid;
+      map.set(key, {
+        key,
+        name: p.name,
+        department: p.department,
+        year: p.year,
+        bio: p.bio,
+        hackerRankHandle: p.hackerRankHandle,
+        hackerRankUrl: p.hackerRankUrl,
+        githubUrl: p.githubUrl,
+        linkedinUrl: p.linkedinUrl,
+        completedDsaCount: p.completedDsaCount,
+        completedRoadmapCount: p.completedRoadmapCount,
+        skills: p.skills || [],
+      });
+    });
+
+    // 2. Merge live leaderboard achievements
+    sortedLb.forEach((entry, idx) => {
+      const handleKey = normalize(entry.hackerRankHandle);
+      const nameKey = normalize(entry.name);
+      const existing =
+        (handleKey && map.get(handleKey)) ||
+        Array.from(map.values()).find((c) => normalize(c.name) === nameKey);
+
+      if (existing) {
+        existing.rank = idx + 1;
+        existing.score = entry.score;
+        existing.problemsSolved = entry.problemsSolved;
+        if (!existing.hackerRankHandle) existing.hackerRankHandle = entry.hackerRankHandle;
+      } else {
+        const key = handleKey || `lb_${entry.id}`;
+        map.set(key, {
+          key,
+          name: entry.name,
+          department: entry.department,
+          year: entry.year,
+          bio: `Active Paavai HackerRank competitor in ${entry.department}.`,
+          hackerRankHandle: entry.hackerRankHandle,
+          hackerRankUrl: entry.hackerRankHandle
+            ? `https://www.hackerrank.com/profile/${entry.hackerRankHandle.replace(/^@/, '')}`
+            : undefined,
+          rank: idx + 1,
+          score: entry.score,
+          problemsSolved: entry.problemsSolved,
+          skills: ['Algorithms', 'Problem Solving'],
+        });
+      }
+    });
+
+    // 3. Merge Crew & Lead mentors
+    teamMembers.forEach((tm) => {
+      const handleKey = normalize(tm.hackerRankHandle);
+      const nameKey = normalize(tm.name);
+      const existing =
+        (handleKey && map.get(handleKey)) ||
+        Array.from(map.values()).find((c) => normalize(c.name) === nameKey);
+
+      if (existing) {
+        existing.designation = tm.designation;
+        if (!existing.bio && tm.bio) existing.bio = tm.bio;
+      } else {
+        const key = handleKey || `tm_${tm.id}`;
+        map.set(key, {
+          key,
+          name: tm.name,
+          department: tm.department,
+          year: tm.year,
+          bio: tm.bio || `${tm.designation} at HackerRank Campus Crew Paavai.`,
+          designation: tm.designation,
+          hackerRankHandle: tm.hackerRankHandle,
+          skills: ['Mentorship', 'DSA'],
+        });
+      }
+    });
+
+    const list = Array.from(map.values());
+    if (list.length === 0) {
+      return { spotlight: null, totalCandidates: 0 };
+    }
+
+    const weekIndex = getWeekNumber() % list.length;
+    return {
+      spotlight: list[weekIndex],
+      totalCandidates: list.length,
+    };
+  }, [publicProfiles, leaderboard, teamMembers]);
+
+  if (!spotlight) {
+    return null;
+  }
+
+  const initials = spotlight.name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() || '')
+    .join('');
+
+  return (
+    <section
+      aria-labelledby="member-spotlight-heading"
+      className="max-w-7xl mx-auto px-4 sm:px-6 pt-16"
+    >
+      <div className="p-6 sm:p-9 rounded-2xl border border-[#00EA64]/35 bg-white dark:bg-[#121821] grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+        <div className="lg:col-span-7 space-y-4">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-semibold bg-[#00EA64]/15 text-[#009942] dark:text-[#00EA64]">
+              <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Weekly Member Spotlight</span>
+            </span>
+            {spotlight.designation && (
+              <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                · {spotlight.designation}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-xl bg-[#00EA64] text-[#0B0F14] font-mono text-lg font-bold flex items-center justify-center shrink-0">
+              {initials || 'PC'}
+            </div>
+            <div className="min-w-0">
+              <h2
+                id="member-spotlight-heading"
+                className="font-mono text-2xl font-bold text-slate-900 dark:text-white truncate"
+              >
+                {spotlight.name}
+              </h2>
+              <p className="text-xs sm:text-sm font-mono text-slate-500 dark:text-slate-400">
+                {spotlight.department} · {spotlight.year}
+                {spotlight.hackerRankHandle ? ` · ${spotlight.hackerRankHandle}` : ''}
+              </p>
+            </div>
+          </div>
+
+          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed max-w-2xl">
+            {spotlight.bio ||
+              'Consistent contributor to the Paavai HackerRank Campus Crew coding community.'}
+          </p>
+
+          {/* Linked Social Portfolio Badges */}
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            {spotlight.hackerRankUrl && (
+              <a
+                href={spotlight.hackerRankUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-lg text-xs font-mono border border-[#00EA64]/40 bg-[#00EA64]/10 text-[#009942] dark:text-[#00EA64] inline-flex items-center gap-1.5 hover:bg-[#00EA64]/20 transition-colors"
+              >
+                <Code2 className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>HackerRank</span>
+                <ExternalLink className="w-3 h-3" aria-hidden="true" />
+              </a>
+            )}
+            {spotlight.githubUrl && (
+              <a
+                href={spotlight.githubUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-lg text-xs font-mono border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 hover:border-[#00EA64] transition-colors"
+              >
+                <Github className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>GitHub</span>
+                <ExternalLink className="w-3 h-3" aria-hidden="true" />
+              </a>
+            )}
+            {spotlight.linkedinUrl && (
+              <a
+                href={spotlight.linkedinUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-lg text-xs font-mono border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 hover:border-[#00EA64] transition-colors"
+              >
+                <Linkedin className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>LinkedIn</span>
+                <ExternalLink className="w-3 h-3" aria-hidden="true" />
+              </a>
+            )}
+          </div>
+        </div>
+
+        {/* Highlighted Achievements & Roadmap Progress */}
+        <div className="lg:col-span-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-3.5">
+          {spotlight.rank !== undefined && (
+            <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0F14] flex items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <Trophy className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" />
+                  <span>Leaderboard Achievement</span>
+                </p>
+                <p className="font-mono text-lg font-bold text-slate-900 dark:text-white tabular-nums">
+                  Rank #{spotlight.rank} · {(spotlight.score ?? 0).toLocaleString()} pts
+                </p>
+              </div>
+              <span className="font-mono text-xs text-[#009942] dark:text-[#00EA64] tabular-nums">
+                {spotlight.problemsSolved ?? 0} solved
+              </span>
+            </div>
+          )}
+
+          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0F14] flex items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <Award className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" />
+                <span>Roadmap Milestones</span>
+              </p>
+              <p className="font-mono text-base font-bold text-slate-900 dark:text-white tabular-nums">
+                {spotlight.completedDsaCount !== undefined
+                  ? `${spotlight.completedDsaCount}${totalDsaModules > 0 ? ` / ${totalDsaModules}` : ''} DSA modules completed`
+                  : `${spotlight.skills.slice(0, 2).join(' · ') || 'Active DSA Track'}`}
+              </p>
+            </div>
+            <Link
+              to="/leaderboard"
+              className="text-xs font-mono text-[#009942] dark:text-[#00EA64] hover:underline whitespace-nowrap"
+            >
+              Standings →
+            </Link>
+          </div>
+
+          <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+            Rotates weekly across {totalCandidates} verified Paavai community coder
+            {totalCandidates === 1 ? '' : 's'}.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+};

@@ -43,6 +43,7 @@ import {
   LeaderboardEntry,
   LearningResource,
   PermissionKey,
+  PublicProfile,
   ROLE_META,
   SiteSettings,
   TeamMember,
@@ -125,6 +126,7 @@ interface AppContextValue {
   // Live Firestore Data Collections
   siteSettings: SiteSettings;
   users: UserAccount[];
+  publicProfiles: PublicProfile[];
   teamMembers: TeamMember[];
   events: CampusEvent[];
   announcements: Announcement[];
@@ -182,7 +184,17 @@ interface AppContextValue {
     updates: Partial<
       Pick<
         UserAccount,
-        'name' | 'regNo' | 'department' | 'year' | 'phone' | 'hackerRankHandle' | 'bio' | 'skills'
+        | 'name'
+        | 'regNo'
+        | 'department'
+        | 'year'
+        | 'phone'
+        | 'hackerRankHandle'
+        | 'hackerRankUrl'
+        | 'githubUrl'
+        | 'linkedinUrl'
+        | 'bio'
+        | 'skills'
       >
     >
   ) => Promise<void>;
@@ -370,6 +382,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Live Firestore collections (zero demo/mock fallback data)
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(INITIAL_SITE_SETTINGS);
   const [liveUsers, setLiveUsers] = useState<UserAccount[]>([]);
+  const [publicProfiles, setPublicProfiles] = useState<PublicProfile[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [events, setEvents] = useState<CampusEvent[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -574,6 +587,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             year: String(data.year || '1st Year'),
             phone: String(data.phone || ''),
             hackerRankHandle: String(data.hackerRankHandle || '@paavai_coder'),
+            hackerRankUrl: data.hackerRankUrl ? String(data.hackerRankUrl) : '',
+            githubUrl: data.githubUrl ? String(data.githubUrl) : '',
+            linkedinUrl: data.linkedinUrl ? String(data.linkedinUrl) : '',
             bio: String(data.bio || ''),
             skills: Array.isArray(data.skills) ? data.skills.map(String) : [],
             joinedAt: String(data.joinedAt || new Date().toISOString().slice(0, 10)),
@@ -804,6 +820,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (error) => handleFirestoreError(error, OperationType.LIST, 'gallery')
     );
 
+    // 8. Public Non-PII Member Portfolios (for Member Spotlight)
+    const unsubPublicProfiles = onSnapshot(
+      collection(db, 'public_profiles'),
+      (snap) => {
+        setPublicProfiles(
+          snap.docs.map((d) => {
+            const x = d.data();
+            return {
+              id: d.id,
+              uid: String(x.uid || d.id),
+              name: String(x.name || ''),
+              department: String(x.department || ''),
+              year: String(x.year || ''),
+              bio: String(x.bio || ''),
+              skills: Array.isArray(x.skills) ? x.skills.map(String) : [],
+              hackerRankHandle: String(x.hackerRankHandle || ''),
+              hackerRankUrl: x.hackerRankUrl ? String(x.hackerRankUrl) : '',
+              githubUrl: x.githubUrl ? String(x.githubUrl) : '',
+              linkedinUrl: x.linkedinUrl ? String(x.linkedinUrl) : '',
+              completedDsaCount: Number(x.completedDsaCount || 0),
+              completedRoadmapCount: Number(x.completedRoadmapCount || 0),
+              updatedAt: x.updatedAt ? String(x.updatedAt) : undefined,
+            };
+          })
+        );
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'public_profiles')
+    );
+
     return () => {
       unsubSettings();
       unsubTeam();
@@ -812,6 +857,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubLeaderboard();
       unsubResources();
       unsubGallery();
+      unsubPublicProfiles();
     };
   }, [authReady, isVerifiedAllowedUser, isRealCrewOrLead]);
 
@@ -878,6 +924,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               year: String(x.year || ''),
               phone: String(x.phone || ''),
               hackerRankHandle: String(x.hackerRankHandle || ''),
+              hackerRankUrl: x.hackerRankUrl ? String(x.hackerRankUrl) : '',
+              githubUrl: x.githubUrl ? String(x.githubUrl) : '',
+              linkedinUrl: x.linkedinUrl ? String(x.linkedinUrl) : '',
               bio: String(x.bio || ''),
               skills: Array.isArray(x.skills) ? x.skills.map(String) : [],
               joinedAt: String(x.joinedAt || ''),
@@ -1269,7 +1318,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     try {
       auth.useDeviceLanguage();
-      await sendPasswordResetEmail(auth, trimmedEmail);
+      if (typeof window !== 'undefined' && window.location?.origin) {
+        const resetActionSettings: ActionCodeSettings = {
+          url: `${window.location.origin}/login`,
+          handleCodeInApp: false,
+        };
+        try {
+          await sendPasswordResetEmail(auth, trimmedEmail, resetActionSettings);
+        } catch (continueErr: unknown) {
+          const cCode = (continueErr as { code?: string })?.code || '';
+          if (
+            cCode === 'auth/unauthorized-continue-uri' ||
+            cCode === 'auth/invalid-continue-uri' ||
+            cCode === 'auth/missing-continue-uri'
+          ) {
+            await sendPasswordResetEmail(auth, trimmedEmail);
+          } else {
+            throw continueErr;
+          }
+        }
+      } else {
+        await sendPasswordResetEmail(auth, trimmedEmail);
+      }
       addToast(
         'Password reset email sent',
         `Check ${trimmedEmail} (including Spam/Promotions) for your password reset link.`,
@@ -1789,10 +1859,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const path = `user_progress/${firebaseUser.uid}`;
     try {
+      const sliced = next.slice(0, 200);
+      const nowISO = new Date().toISOString();
       await setDoc(doc(db, 'user_progress', firebaseUser.uid), {
         uid: firebaseUser.uid,
-        completedResourceIds: next.slice(0, 200),
-        updatedAt: new Date().toISOString(),
+        completedResourceIds: sliced,
+        updatedAt: nowISO,
+      });
+
+      const dsaCount = resources.filter(
+        (r) => r.track === 'DSA' && sliced.includes(r.id)
+      ).length;
+      await setDoc(doc(db, 'public_profiles', firebaseUser.uid), {
+        uid: firebaseUser.uid,
+        name: ensureMinLen(currentUser.name, 'Paavai Coder', 2, 100),
+        department: ensureMinLen(currentUser.department, 'CSE', 2, 40),
+        year: ensureMinLen(currentUser.year, '1st Year', 2, 20),
+        bio: clampStr(currentUser.bio || '', 500),
+        skills: (currentUser.skills || []).slice(0, 12),
+        hackerRankHandle: clampStr(currentUser.hackerRankHandle || '', 60),
+        hackerRankUrl: clampStr(currentUser.hackerRankUrl || '', 300),
+        githubUrl: clampStr(currentUser.githubUrl || '', 300),
+        linkedinUrl: clampStr(currentUser.linkedinUrl || '', 300),
+        completedDsaCount: dsaCount,
+        completedRoadmapCount: sliced.length,
+        updatedAt: nowISO,
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
@@ -1971,8 +2062,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updates.hackerRankHandle !== undefined
         ? clampStr(updates.hackerRankHandle, 60)
         : currentUser.hackerRankHandle;
+    const nextHackerRankUrl =
+      updates.hackerRankUrl !== undefined
+        ? clampStr(updates.hackerRankUrl, 300)
+        : currentUser.hackerRankUrl || '';
+    const nextGithubUrl =
+      updates.githubUrl !== undefined
+        ? clampStr(updates.githubUrl, 300)
+        : currentUser.githubUrl || '';
+    const nextLinkedinUrl =
+      updates.linkedinUrl !== undefined
+        ? clampStr(updates.linkedinUrl, 300)
+        : currentUser.linkedinUrl || '';
     const nextBio =
       updates.bio !== undefined ? clampStr(updates.bio, 500) : currentUser.bio;
+    const nextSkills =
+      updates.skills !== undefined
+        ? updates.skills.slice(0, 12)
+        : currentUser.skills;
+    const nowISO = new Date().toISOString();
 
     try {
       await updateDoc(doc(db, 'users', firebaseUser.uid), {
@@ -1984,9 +2092,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...(updates.year !== undefined ? { year: nextYear } : {}),
         ...(updates.phone !== undefined ? { phone: clampStr(updates.phone, 20) } : {}),
         ...(updates.hackerRankHandle !== undefined ? { hackerRankHandle: nextHandle } : {}),
+        ...(updates.hackerRankUrl !== undefined ? { hackerRankUrl: nextHackerRankUrl } : {}),
+        ...(updates.githubUrl !== undefined ? { githubUrl: nextGithubUrl } : {}),
+        ...(updates.linkedinUrl !== undefined ? { linkedinUrl: nextLinkedinUrl } : {}),
         ...(updates.bio !== undefined ? { bio: nextBio } : {}),
-        ...(updates.skills !== undefined ? { skills: updates.skills.slice(0, 12) } : {}),
-        updatedAt: new Date().toISOString(),
+        ...(updates.skills !== undefined ? { skills: nextSkills } : {}),
+        updatedAt: nowISO,
+      });
+
+      const dsaCount = resources.filter(
+        (r) => r.track === 'DSA' && completedResourceIds.includes(r.id)
+      ).length;
+
+      await setDoc(doc(db, 'public_profiles', firebaseUser.uid), {
+        uid: firebaseUser.uid,
+        name: nextName,
+        department: nextDepartment,
+        year: nextYear,
+        bio: nextBio,
+        skills: nextSkills,
+        hackerRankHandle: nextHandle,
+        hackerRankUrl: nextHackerRankUrl,
+        githubUrl: nextGithubUrl,
+        linkedinUrl: nextLinkedinUrl,
+        completedDsaCount: dsaCount,
+        completedRoadmapCount: completedResourceIds.length,
+        updatedAt: nowISO,
       });
 
       if (currentUser.role === 'lead' || currentUser.role === 'crew') {
@@ -2032,6 +2163,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         logout,
         siteSettings,
         users,
+        publicProfiles,
         teamMembers,
         events,
         announcements,

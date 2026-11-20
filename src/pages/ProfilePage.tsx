@@ -5,6 +5,7 @@ import { ACADEMIC_YEARS, DEPARTMENTS, ROLE_META } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 import { NotificationBanner } from '../components/NotificationBanner';
 import { ProfileBadges } from '../components/ProfileBadges';
+import { SocialConnections } from '../components/SocialConnections';
 
 export const ProfilePage: React.FC = () => {
   const {
@@ -110,6 +111,13 @@ export const ProfilePage: React.FC = () => {
         resources={resources}
         completedResourceIds={completedResourceIds}
         leaderboard={leaderboard}
+      />
+
+      <SocialConnections
+        user={currentUser}
+        onSave={async (socialUpdates) => {
+          await updateOwnProfile(socialUpdates);
+        }}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

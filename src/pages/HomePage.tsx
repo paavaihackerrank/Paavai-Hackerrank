@@ -5,6 +5,7 @@ import { ArrowRight, Calendar, ChevronRight, Code2, Megaphone, Trophy, Users } f
 import { CHAPTER_IMAGES } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 import { SafeImage } from '../components/SafeImage';
+import { MemberSpotlight } from '../components/MemberSpotlight';
 
 export const HomePage: React.FC = () => {
   const {
@@ -363,6 +364,9 @@ export const HomePage: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {/* Weekly Member Spotlight */}
+      <MemberSpotlight />
 
       {/* Bottom CTA Band */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 pt-20">

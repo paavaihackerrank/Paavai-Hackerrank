@@ -75,10 +75,16 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({
       {successMessage && (
         <div
           role="status"
-          className="p-3 rounded-lg text-xs font-medium bg-[#00EA64]/10 border border-[#00EA64]/30 text-[#009942] dark:text-[#00EA64] leading-relaxed flex items-start gap-2"
+          className="p-3.5 rounded-lg text-xs font-medium bg-[#00EA64]/10 border border-[#00EA64]/30 text-[#009942] dark:text-[#00EA64] leading-relaxed space-y-1.5"
         >
-          <MailCheck className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
-          <span>{successMessage}</span>
+          <div className="flex items-start gap-2">
+            <MailCheck className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+            <span>{successMessage}</span>
+          </div>
+          <p className="text-[11px] text-slate-600 dark:text-slate-300 pl-6">
+            Didn&apos;t receive it after 2 minutes? Check Spam/Quarantine, and confirm this account
+            is registered in Firebase Authentication with the Email/Password provider enabled.
+          </p>
         </div>
       )}
 

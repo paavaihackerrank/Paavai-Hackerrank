@@ -5,7 +5,7 @@
 2. **Immediate Member Provisioning (No User Status Gate)**: On first verified login, `/users/{uid}` is created with `role: 'member'`, `regNo`, `department`, `year`, `name`, and `email`—with no `status` field.
 3. **Immutable Self-Role**: Users can edit their own profile fields (`name`, `regNo`, `department`, `year`, `phone`, `hackerRankHandle`, `bio`, `skills`), but NEVER their own `role`. Only a `lead` can promote `member` → `crew` or demote `crew` → `member`.
 4. **Approval Gate for Crew Content**: `crew` members creating `/events/{id}` or `/announcements/{id}` MUST submit `status == 'pending'`. Only `lead` can set `status == 'approved'` or `'rejected'`.
-5. **PII Isolation**: `/users/{uid}`, `/registrations/{id}`, and `/join_requests/{id}` are never readable by guests or unrelated students.
+5. **PII Isolation**: `/users/{uid}`, `/registrations/{id}`, and `/join_requests/{id}` are never readable by guests or unrelated students. Non-PII portfolio data (`hackerRankUrl`, `githubUrl`, `linkedinUrl`, `skills`, `completedDsaCount`) is isolated in `/public_profiles/{uid}` without `email`, `phone`, or `regNo`.
 
 ## 2. Adversarial Payloads (Must Return PERMISSION_DENIED)
 1. Unverified `@paavai.edu.in` account attempts to create `/users/{uid}` or `/registrations/{id}`.

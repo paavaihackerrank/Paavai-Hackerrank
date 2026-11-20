@@ -210,10 +210,30 @@ export interface UserAccount {
   year: string;
   phone: string;
   hackerRankHandle: string;
+  hackerRankUrl?: string;
+  githubUrl?: string;
+  linkedinUrl?: string;
   bio: string;
   skills: string[];
   joinedAt: string;
   createdAt?: string;
+}
+
+export interface PublicProfile {
+  id: string;
+  uid: string;
+  name: string;
+  department: string;
+  year: string;
+  bio: string;
+  skills: string[];
+  hackerRankHandle: string;
+  hackerRankUrl?: string;
+  githubUrl?: string;
+  linkedinUrl?: string;
+  completedDsaCount: number;
+  completedRoadmapCount: number;
+  updatedAt?: string;
 }
 
 export interface TeamMember {
