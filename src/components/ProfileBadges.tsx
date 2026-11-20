@@ -35,6 +35,164 @@ interface BadgeDefinition {
 const normalizeHandle = (raw?: string) =>
   (raw || '').trim().toLowerCase().replace(/^@/, '');
 
+export interface BadgeSummary {
+  badges: BadgeDefinition[];
+  earnedCount: number;
+  totalBadges: number;
+  leaderboardRank: number | null;
+  leaderboardScore: number;
+  problemsSolved: number;
+  badgeRankTitle: 'Campus Ace' | 'Core Solver' | 'Contender' | 'Explorer';
+  nextRankTitle: 'Core Solver' | 'Campus Ace' | 'Contender' | null;
+  nextRankProgressPct: number;
+  nextRankHint: string;
+}
+
+export function computeUserBadgeSummary(
+  user: UserAccount,
+  resources: LearningResource[],
+  completedResourceIds: string[],
+  leaderboard: LeaderboardEntry[]
+): BadgeSummary {
+  const dsaModules = resources.filter((r) => r.track === 'DSA');
+  const completedDsaCount = dsaModules.filter((r) =>
+    completedResourceIds.includes(r.id)
+  ).length;
+  const totalDsaCount = dsaModules.length;
+  const halfThreshold =
+    totalDsaCount > 0 ? Math.max(1, Math.ceil(totalDsaCount / 2)) : 2;
+
+  const sortedLeaderboard = [...leaderboard].sort((a, b) => b.score - a.score);
+  const userReg = user.regNo.trim().toLowerCase();
+  const userHandle = normalizeHandle(user.hackerRankHandle);
+
+  const matchedIndex = sortedLeaderboard.findIndex((entry) => {
+    const regMatch =
+      Boolean(userReg) &&
+      entry.registerNumber.trim().toLowerCase() === userReg;
+    const entryHandle = normalizeHandle(entry.hackerRankHandle);
+    const handleMatch =
+      Boolean(userHandle) &&
+      userHandle !== 'paavai_coder' &&
+      entryHandle === userHandle;
+    return regMatch || handleMatch;
+  });
+
+  const myEntry = matchedIndex >= 0 ? sortedLeaderboard[matchedIndex] : null;
+  const myRank = matchedIndex >= 0 ? matchedIndex + 1 : null;
+  const myScore = myEntry?.score ?? 0;
+  const mySolved = myEntry?.problemsSolved ?? 0;
+
+  const badges: BadgeDefinition[] = [
+    {
+      id: 'dsa-starter',
+      title: 'DSA Starter',
+      category: 'DSA Roadmap',
+      description: 'Complete your first DSA roadmap module.',
+      progressLabel:
+        totalDsaCount > 0
+          ? `${Math.min(completedDsaCount, 1)} / 1 DSA module`
+          : '0 DSA modules published',
+      earned: completedDsaCount >= 1,
+      icon: Code2,
+    },
+    {
+      id: 'dsa-builder',
+      title: 'Algorithm Builder',
+      category: 'DSA Roadmap',
+      description: `Complete at least ${halfThreshold} DSA roadmap module${halfThreshold === 1 ? '' : 's'}.`,
+      progressLabel:
+        totalDsaCount > 0
+          ? `${completedDsaCount} / ${halfThreshold} DSA modules`
+          : 'Waiting for DSA modules',
+      earned: totalDsaCount > 0 && completedDsaCount >= halfThreshold,
+      icon: Flame,
+    },
+    {
+      id: 'dsa-master',
+      title: 'DSA Roadmap Master',
+      category: 'DSA Roadmap',
+      description: 'Complete 100% of all published DSA roadmap modules.',
+      progressLabel:
+        totalDsaCount > 0
+          ? `${completedDsaCount} / ${totalDsaCount} DSA modules`
+          : 'Waiting for DSA modules',
+      earned: totalDsaCount > 0 && completedDsaCount >= totalDsaCount,
+      icon: Award,
+    },
+    {
+      id: 'ranked-contender',
+      title: 'Ranked Contender',
+      category: 'Leaderboard',
+      description: 'Appear on the Paavai HackerRank Campus Leaderboard.',
+      progressLabel: myEntry
+        ? `Rank #${myRank} · ${myScore.toLocaleString()} pts`
+        : 'Not ranked on leaderboard yet',
+      earned: Boolean(myEntry && (myScore > 0 || mySolved > 0)),
+      icon: TrendingUp,
+    },
+    {
+      id: 'problem-crusher',
+      title: 'Problem Crusher',
+      category: 'Leaderboard',
+      description: 'Solve 25 or more problems tracked on the Campus Leaderboard.',
+      progressLabel: `${mySolved} / 25 problems solved`,
+      earned: mySolved >= 25,
+      icon: Zap,
+    },
+    {
+      id: 'top-three-podium',
+      title: 'Campus Top 3 Podium',
+      category: 'Leaderboard',
+      description: 'Reach Top 3 on the official Campus Leaderboard standings.',
+      progressLabel: myRank ? `Current Rank: #${myRank}` : 'Unranked',
+      earned: myRank !== null && myRank <= 3,
+      icon: Trophy,
+    },
+  ];
+
+  const earnedCount = badges.filter((b) => b.earned).length;
+  const totalBadges = badges.length;
+
+  let badgeRankTitle: BadgeSummary['badgeRankTitle'] = 'Explorer';
+  let nextRankTitle: BadgeSummary['nextRankTitle'] = 'Contender';
+  let nextRankProgressPct = 0;
+  let nextRankHint = 'Earn your first badge in the DSA Roadmap or Campus Leaderboard to reach Contender.';
+
+  if (earnedCount >= 5) {
+    badgeRankTitle = 'Campus Ace';
+    nextRankTitle = null;
+    nextRankProgressPct = 100;
+    nextRankHint =
+      earnedCount === totalBadges
+        ? 'All chapter badges unlocked. Keep mentoring peers and leading contests!'
+        : `Unlock ${totalBadges - earnedCount} remaining badge to complete 100% mastery.`;
+  } else if (earnedCount >= 3) {
+    badgeRankTitle = 'Core Solver';
+    nextRankTitle = 'Campus Ace';
+    nextRankProgressPct = Math.round(((earnedCount - 3) / 2) * 100);
+    nextRankHint = `Earn ${5 - earnedCount} more badge${5 - earnedCount === 1 ? '' : 's'} to advance to Campus Ace.`;
+  } else if (earnedCount >= 1) {
+    badgeRankTitle = 'Contender';
+    nextRankTitle = 'Core Solver';
+    nextRankProgressPct = Math.round(((earnedCount - 1) / 2) * 100);
+    nextRankHint = `Earn ${3 - earnedCount} more badge${3 - earnedCount === 1 ? '' : 's'} to reach Core Solver.`;
+  }
+
+  return {
+    badges,
+    earnedCount,
+    totalBadges,
+    leaderboardRank: myRank,
+    leaderboardScore: myScore,
+    problemsSolved: mySolved,
+    badgeRankTitle,
+    nextRankTitle,
+    nextRankProgressPct,
+    nextRankHint,
+  };
+}
+
 /**
  * Achievement Badges section for ProfilePage, awarded dynamically from the
  * user's completed DSA roadmap modules and Campus Leaderboard activity.
@@ -45,109 +203,10 @@ export const ProfileBadges: React.FC<ProfileBadgesProps> = ({
   completedResourceIds,
   leaderboard,
 }) => {
-  const { badges, earnedCount } = useMemo(() => {
-    const dsaModules = resources.filter((r) => r.track === 'DSA');
-    const completedDsaCount = dsaModules.filter((r) =>
-      completedResourceIds.includes(r.id)
-    ).length;
-    const totalDsaCount = dsaModules.length;
-    const halfThreshold =
-      totalDsaCount > 0 ? Math.max(1, Math.ceil(totalDsaCount / 2)) : 2;
-
-    const sortedLeaderboard = [...leaderboard].sort((a, b) => b.score - a.score);
-    const userReg = user.regNo.trim().toLowerCase();
-    const userHandle = normalizeHandle(user.hackerRankHandle);
-
-    const matchedIndex = sortedLeaderboard.findIndex((entry) => {
-      const regMatch =
-        Boolean(userReg) &&
-        entry.registerNumber.trim().toLowerCase() === userReg;
-      const entryHandle = normalizeHandle(entry.hackerRankHandle);
-      const handleMatch =
-        Boolean(userHandle) &&
-        userHandle !== 'paavai_coder' &&
-        entryHandle === userHandle;
-      return regMatch || handleMatch;
-    });
-
-    const myEntry = matchedIndex >= 0 ? sortedLeaderboard[matchedIndex] : null;
-    const myRank = matchedIndex >= 0 ? matchedIndex + 1 : null;
-    const myScore = myEntry?.score ?? 0;
-    const mySolved = myEntry?.problemsSolved ?? 0;
-
-    const list: BadgeDefinition[] = [
-      {
-        id: 'dsa-starter',
-        title: 'DSA Starter',
-        category: 'DSA Roadmap',
-        description: 'Complete your first DSA roadmap module.',
-        progressLabel:
-          totalDsaCount > 0
-            ? `${Math.min(completedDsaCount, 1)} / 1 DSA module`
-            : '0 DSA modules published',
-        earned: completedDsaCount >= 1,
-        icon: Code2,
-      },
-      {
-        id: 'dsa-builder',
-        title: 'Algorithm Builder',
-        category: 'DSA Roadmap',
-        description: `Complete at least ${halfThreshold} DSA roadmap module${halfThreshold === 1 ? '' : 's'}.`,
-        progressLabel:
-          totalDsaCount > 0
-            ? `${completedDsaCount} / ${halfThreshold} DSA modules`
-            : 'Waiting for DSA modules',
-        earned: totalDsaCount > 0 && completedDsaCount >= halfThreshold,
-        icon: Flame,
-      },
-      {
-        id: 'dsa-master',
-        title: 'DSA Roadmap Master',
-        category: 'DSA Roadmap',
-        description: 'Complete 100% of all published DSA roadmap modules.',
-        progressLabel:
-          totalDsaCount > 0
-            ? `${completedDsaCount} / ${totalDsaCount} DSA modules`
-            : 'Waiting for DSA modules',
-        earned: totalDsaCount > 0 && completedDsaCount >= totalDsaCount,
-        icon: Award,
-      },
-      {
-        id: 'ranked-contender',
-        title: 'Ranked Contender',
-        category: 'Leaderboard',
-        description: 'Appear on the Paavai HackerRank Campus Leaderboard.',
-        progressLabel: myEntry
-          ? `Rank #${myRank} · ${myScore.toLocaleString()} pts`
-          : 'Not ranked on leaderboard yet',
-        earned: Boolean(myEntry && (myScore > 0 || mySolved > 0)),
-        icon: TrendingUp,
-      },
-      {
-        id: 'problem-crusher',
-        title: 'Problem Crusher',
-        category: 'Leaderboard',
-        description: 'Solve 25 or more problems tracked on the Campus Leaderboard.',
-        progressLabel: `${mySolved} / 25 problems solved`,
-        earned: mySolved >= 25,
-        icon: Zap,
-      },
-      {
-        id: 'top-three-podium',
-        title: 'Campus Top 3 Podium',
-        category: 'Leaderboard',
-        description: 'Reach Top 3 on the official Campus Leaderboard standings.',
-        progressLabel: myRank ? `Current Rank: #${myRank}` : 'Unranked',
-        earned: myRank !== null && myRank <= 3,
-        icon: Trophy,
-      },
-    ];
-
-    return {
-      badges: list,
-      earnedCount: list.filter((b) => b.earned).length,
-    };
-  }, [user, resources, completedResourceIds, leaderboard]);
+  const { badges, earnedCount } = useMemo(
+    () => computeUserBadgeSummary(user, resources, completedResourceIds, leaderboard),
+    [user, resources, completedResourceIds, leaderboard]
+  );
 
   return (
     <section

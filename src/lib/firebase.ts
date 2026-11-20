@@ -36,7 +36,7 @@ if (firebaseAppletConfig.measurementId) {
 export const db = getFirestore(app, firebaseAppletConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 
-export const CAMPUS_LEAD_EMAIL = '622123104144@paavai.edu.in';
+export const CAMPUS_LEAD_EMAIL = 'paavaihackerrank@gmail.com';
 export const BOOTSTRAPPED_ADMIN_EMAIL = CAMPUS_LEAD_EMAIL;
 export const BOOTSTRAPPED_ADMIN_EMAILS = [CAMPUS_LEAD_EMAIL] as const;
 

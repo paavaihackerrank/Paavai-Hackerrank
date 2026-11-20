@@ -12,6 +12,7 @@ import {
 import { ROLE_META } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 import { DsaProgressBar } from '../components/DsaProgressBar';
+import { MemberActivityChart } from '../components/MemberActivityChart';
 
 export const MemberDashboardPage: React.FC = () => {
   const {
@@ -21,6 +22,7 @@ export const MemberDashboardPage: React.FC = () => {
     resources,
     registrations,
     completedResourceIds,
+    codingActivities,
     toggleResourceCompleted,
     cancelRegistration,
   } = useApp();
@@ -128,6 +130,14 @@ export const MemberDashboardPage: React.FC = () => {
         resources={resources}
         completedResourceIds={completedResourceIds}
         onToggleCompleted={toggleResourceCompleted}
+      />
+
+      {/* Member Activity Trend Chart (Recharts) */}
+      <MemberActivityChart
+        resources={resources}
+        completedResourceIds={completedResourceIds}
+        codingActivities={codingActivities}
+        joinedAt={currentUser.joinedAt}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

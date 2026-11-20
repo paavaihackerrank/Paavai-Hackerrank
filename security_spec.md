@@ -1,7 +1,7 @@
 # Firestore Security Specification (Updated)
 
 ## 1. Data Invariants
-1. **Verified Account Access (`signedIn()`)**: `signedIn()` requires `request.auth != null`, `request.auth.token.email_verified == true`, and a valid email address (students sign up with their personal email for reliable delivery while registering a unique Paavai college email ID and unique phone number; `622123104144@paavai.edu.in` remains the bootstrapped Campus Lead).
+1. **Verified Account Access (`signedIn()`)**: `signedIn()` requires `request.auth != null`, `request.auth.token.email_verified == true`, and a valid email address (students sign up with their personal email for reliable delivery while registering a unique Paavai college email ID and unique phone number; `paavaihackerrank@gmail.com` is the bootstrapped Campus Lead admin email).
 2. **Immediate Member Provisioning (No User Status Gate)**: On first verified login, `/users/{uid}` is created with `role: 'member'`, `regNo`, `department`, `year`, `name`, `email`, `collegeEmail`, and `phone`—with no `status` field.
 3. **Immutable Self-Role & Unique Identifiers**: Users can edit their own profile fields (`name`, `regNo`, `department`, `year`, `phone`, `hackerRankHandle`, `bio`, `skills`), but NEVER their own `role`. Only a `lead` can promote `member` → `crew` or demote `crew` → `member`. Uniqueness of personal `email`, `phone`, and `collegeEmail` is enforced via SHA-256 hash-keyed locks in `/unique_emails/{emailHash}`, `/unique_phones/{phoneHash}`, and `/unique_college_emails/{emailHash}` (no `list` allowed).
 4. **Approval Gate for Crew Content**: `crew` members creating `/events/{id}` or `/announcements/{id}` MUST submit `status == 'pending'`. Only `lead` can set `status == 'approved'` or `'rejected'`.
@@ -19,7 +19,7 @@
 7. `crew` attempts to update `/users/{otherUid}` role.
 8. Unauthenticated guest attempts to read `/resources/{id}` where `access == 'full'`.
 9. Student A reads `/users/{studentB}` or `/registrations/{studentB_reg}` or `/event_checkins/{studentB_chk}`.
-10. Unverified `622123104144@paavai.edu.in` spoof attempts write to `/site_settings/main`.
+10. Unverified `paavaihackerrank@gmail.com` spoof attempts write to `/site_settings/main`.
 11. `crew`, `member`, or guest attempts to read, list, update, or delete `/emailSendAttempts/{id}`.
 12. Any client attempts `list` on `/unique_emails`, `/unique_phones`, or `/unique_college_emails`, or overwrites an existing hash lock.
 13. Student creates `/event_checkin_codes/{code}` or checks into an inactive/non-existent check-in code or spoofs another student's `userId` in `/event_checkins/{id}`.

@@ -432,7 +432,6 @@ const LEGACY_DEMO_EMAILS = new Set([
   'student@paavai.edu.in',
   'praveen.crew@paavai.edu.in',
   'nivetha.m@paavai.edu.in',
-  'paavaihackerrank@gmail.com',
 ]);
 
 const LEGACY_DEMO_TEAM_IDS = new Set([
@@ -1452,7 +1451,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         });
 
-        // Remove emailSendAttempts for removed accounts like paavaihackerrank@gmail.com
+        // Remove emailSendAttempts for legacy demo accounts
         emailLogsSnap.docs.forEach((d) => {
           const x = d.data();
           const logEmail = String(x.email || '').trim().toLowerCase();

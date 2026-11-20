@@ -7,6 +7,7 @@ import { NotificationBanner } from '../components/NotificationBanner';
 import { ProfileBadges } from '../components/ProfileBadges';
 import { SocialConnections } from '../components/SocialConnections';
 import { CodingActivityHeatmap } from '../components/CodingActivityHeatmap';
+import { CommunityEngagementWidget } from '../components/CommunityEngagementWidget';
 
 export const ProfilePage: React.FC = () => {
   const {
@@ -115,6 +116,16 @@ export const ProfilePage: React.FC = () => {
           · Reg No. {currentUser.regNo} · Joined {currentUser.joinedAt}
         </p>
       </header>
+
+      <CommunityEngagementWidget
+        user={currentUser}
+        resources={resources}
+        completedResourceIds={completedResourceIds}
+        leaderboard={leaderboard}
+        eventCheckIns={eventCheckIns}
+        registrations={registrations}
+        codingActivities={codingActivities}
+      />
 
       <ProfileBadges
         user={currentUser}

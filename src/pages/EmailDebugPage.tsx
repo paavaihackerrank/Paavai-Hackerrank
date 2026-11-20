@@ -14,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { CAMPUS_LEAD_EMAIL } from '../lib/firebase';
 import firebaseAppletConfig from '../../firebase-applet-config.json';
 
 export const EmailDebugPage: React.FC = () => {
@@ -465,7 +466,7 @@ export const EmailDebugPage: React.FC = () => {
               When <em>Email enumeration protection</em> is active in Firebase Auth,{' '}
               <code className="font-mono">sendPasswordResetEmail</code> resolves as{' '}
               <code className="font-mono">sent</code> without emailing if{' '}
-              <code className="font-mono">622123104144@paavai.edu.in</code> has not been added or
+              <code className="font-mono">{CAMPUS_LEAD_EMAIL}</code> has not been added or
               signed up in <strong>Authentication → Users</strong> yet.
             </li>
             <li className="p-3 rounded-lg bg-slate-50 dark:bg-[#0B0F14] border border-slate-200 dark:border-slate-800">

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ChevronDown, Mail, MapPin } from 'lucide-react';
 import { FAQ_ITEMS } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
+import { EmailDeliveryFaq } from '../components/EmailDeliveryFaq';
 
 export const ContactFaqPage: React.FC = () => {
   const { siteSettings, addToast } = useApp();
@@ -160,6 +161,9 @@ export const ContactFaqPage: React.FC = () => {
           </div>
         </section>
       </div>
+
+      {/* Email Delivery & Provider Whitelisting FAQ */}
+      <EmailDeliveryFaq />
     </div>
   );
 };
