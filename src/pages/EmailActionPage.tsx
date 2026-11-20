@@ -3,7 +3,10 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowRight,
+  Check,
   CheckCircle2,
+  Eye,
+  EyeOff,
   KeyRound,
   Loader2,
   MailCheck,
@@ -35,6 +38,8 @@ export const EmailActionPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -89,9 +94,12 @@ export const EmailActionPage: React.FC = () => {
     };
   }, [mode, oobCode, verifyActionCode, verifyPasswordResetActionCode, addToast, navigate]);
 
+  const meetsLength = newPassword.length >= 6;
+  const passwordsMatch = Boolean(confirmPassword) && newPassword === confirmPassword;
+
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPassword.length < 6) {
+    if (!meetsLength) {
       setErrorMessage('New password must be at least 6 characters.');
       return;
     }
@@ -134,7 +142,7 @@ export const EmailActionPage: React.FC = () => {
               <AlertTriangle className="w-5 h-5" aria-hidden="true" />
             </div>
             <div className="space-y-1.5">
-              <p className="font-mono text-xs font-semibold uppercase tracking-wide text-red-500">
+              <p className="font-mono text-xs font-semibold text-red-600 dark:text-red-400">
                 Action Link Error
               </p>
               <h1 className="font-mono text-xl font-bold text-slate-900 dark:text-white">
@@ -149,7 +157,7 @@ export const EmailActionPage: React.FC = () => {
                 to="/login"
                 className="px-4 py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors inline-flex items-center gap-1.5"
               >
-                <span>Go to Sign In</span>
+                <span>Request Fresh Link</span>
                 <ArrowRight className="w-4 h-4" aria-hidden="true" />
               </Link>
               <Link
@@ -164,19 +172,37 @@ export const EmailActionPage: React.FC = () => {
 
         {phase === 'reset_form' && (
           <div className="space-y-5">
+            {/* Step Progress */}
+            <div
+              aria-label="Password recovery progress"
+              className="flex items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800 text-[11px] font-mono"
+            >
+              <span className="text-slate-500 dark:text-slate-400">1. Verify Email</span>
+              <span aria-hidden="true" className="text-slate-300 dark:text-slate-700">
+                ·
+              </span>
+              <span className="text-slate-500 dark:text-slate-400">2. Open Reset Link</span>
+              <span aria-hidden="true" className="text-slate-300 dark:text-slate-700">
+                ·
+              </span>
+              <span className="font-semibold text-[#009942] dark:text-[#00EA64]">
+                3. New Password
+              </span>
+            </div>
+
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-xl bg-[#00EA64]/15 border border-[#00EA64]/30 flex items-center justify-center text-[#009942] dark:text-[#00EA64] shrink-0">
                 <KeyRound className="w-5 h-5" aria-hidden="true" />
               </div>
-              <div className="space-y-1">
-                <p className="font-mono text-xs font-semibold uppercase tracking-wide text-[#009942] dark:text-[#00EA64]">
+              <div className="space-y-1 min-w-0">
+                <p className="font-mono text-xs font-semibold text-[#009942] dark:text-[#00EA64]">
                   HRCC Paavai · Password Recovery
                 </p>
                 <h1 className="font-mono text-xl font-bold text-slate-900 dark:text-white">
                   Set a New Password
                 </h1>
                 {targetEmail && (
-                  <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                  <p className="text-xs font-mono text-slate-500 dark:text-slate-400 truncate">
                     Account: {targetEmail}
                   </p>
                 )}
@@ -200,17 +226,32 @@ export const EmailActionPage: React.FC = () => {
                 >
                   New Password
                 </label>
-                <input
-                  id="new-password-input"
-                  type="password"
-                  required
-                  minLength={6}
-                  autoComplete="new-password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="At least 6 characters"
-                  className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
-                />
+                <div className="relative">
+                  <input
+                    id="new-password-input"
+                    type={showNewPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    className="w-full h-10 pl-3 pr-10 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700 focus:outline-none focus:border-[#00EA64]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((prev) => !prev)}
+                    aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}
+                    aria-pressed={showNewPassword}
+                    className="absolute inset-y-0 right-0 w-10 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors rounded-r-lg"
+                  >
+                    {showNewPassword ? (
+                      <EyeOff className="w-4 h-4" aria-hidden="true" />
+                    ) : (
+                      <Eye className="w-4 h-4" aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -220,23 +261,58 @@ export const EmailActionPage: React.FC = () => {
                 >
                   Confirm New Password
                 </label>
-                <input
-                  id="confirm-password-input"
-                  type="password"
-                  required
-                  minLength={6}
-                  autoComplete="new-password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Re-enter your new password"
-                  className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
-                />
+                <div className="relative">
+                  <input
+                    id="confirm-password-input"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter your new password"
+                    className="w-full h-10 pl-3 pr-10 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700 focus:outline-none focus:border-[#00EA64]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((prev) => !prev)}
+                    aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                    aria-pressed={showConfirmPassword}
+                    className="absolute inset-y-0 right-0 w-10 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors rounded-r-lg"
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="w-4 h-4" aria-hidden="true" />
+                    ) : (
+                      <Eye className="w-4 h-4" aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Clean Password Criteria */}
+              <div className="flex flex-wrap items-center gap-4 text-[11px] font-mono text-slate-500 dark:text-slate-400 pt-0.5">
+                <span
+                  className={`inline-flex items-center gap-1 ${
+                    meetsLength ? 'text-[#009942] dark:text-[#00EA64]' : ''
+                  }`}
+                >
+                  <Check className="w-3 h-3" aria-hidden="true" />
+                  <span>6+ characters</span>
+                </span>
+                <span
+                  className={`inline-flex items-center gap-1 ${
+                    passwordsMatch ? 'text-[#009942] dark:text-[#00EA64]' : ''
+                  }`}
+                >
+                  <Check className="w-3 h-3" aria-hidden="true" />
+                  <span>Passwords match</span>
+                </span>
               </div>
 
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60"
+                className="w-full min-h-[42px] py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60"
               >
                 {submitting ? 'Updating Password...' : 'Save New Password'}
               </button>
@@ -250,19 +326,21 @@ export const EmailActionPage: React.FC = () => {
               <CheckCircle2 className="w-6 h-6" aria-hidden="true" />
             </div>
             <div className="space-y-1.5">
-              <p className="font-mono text-xs font-semibold uppercase tracking-wide text-[#009942] dark:text-[#00EA64]">
+              <p className="font-mono text-xs font-semibold text-[#009942] dark:text-[#00EA64]">
                 Password Updated
               </p>
               <h1 className="font-mono text-2xl font-bold text-slate-900 dark:text-white">
                 Your Password Has Been Reset
               </h1>
               <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                {targetEmail ? `Your password for ${targetEmail} has been updated.` : 'Your password has been updated.'}{' '}
+                {targetEmail
+                  ? `Your password for ${targetEmail} has been updated.`
+                  : 'Your password has been updated.'}{' '}
                 You can now sign in with your new credentials.
               </p>
             </div>
             <Link
-              to="/login"
+              to="/login?reset=success"
               className="w-full py-2.5 px-4 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors inline-flex items-center justify-center gap-2"
             >
               <MailCheck className="w-4 h-4" aria-hidden="true" />

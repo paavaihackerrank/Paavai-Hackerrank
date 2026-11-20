@@ -31,6 +31,7 @@ export const EmailDebugPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [templateViewMode, setTemplateViewMode] = useState<'preview' | 'html'>('preview');
 
   if (!can('canAccessAdminPanel')) {
     return null;
@@ -48,11 +49,35 @@ export const EmailDebugPage: React.FC = () => {
 
   const recommendedPasswordResetSubject =
     'Reset your HackerRank Campus Crew – Paavai password';
-  const recommendedPasswordResetBody = `<p>Hello,</p>
-<p>Follow this link to reset your <strong>HackerRank Campus Crew – Paavai Engineering College</strong> account password for <strong>%EMAIL%</strong>:</p>
-<p><a href="%LINK%">Reset Password</a></p>
-<p>If you did not request a password reset, you can safely ignore this email.</p>
-<p>Thanks,<br/>HackerRank Campus Crew · Paavai Engineering College</p>`;
+  const recommendedPasswordResetBody = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8fafc;padding:24px 12px;font-family:Inter,Segoe UI,Arial,sans-serif;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background-color:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+        <tr>
+          <td style="background-color:#0b0f14;padding:20px 24px;border-bottom:2px solid #00ea64;">
+            <p style="margin:0;font-family:monospace;font-size:12px;font-weight:700;color:#00ea64;letter-spacing:0.02em;">HRCC PAAVAI</p>
+            <h1 style="margin:6px 0 0;font-size:18px;font-weight:700;color:#ffffff;">Password Reset Request</h1>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px;color:#334155;font-size:14px;line-height:1.6;">
+            <p style="margin:0 0 12px;">Hello,</p>
+            <p style="margin:0 0 16px;">We received a request to reset the password for your <strong>HackerRank Campus Crew – Paavai Engineering College</strong> account (<strong>%EMAIL%</strong>).</p>
+            <p style="margin:0 0 20px;">
+              <a href="%LINK%" style="display:inline-block;background-color:#00ea64;color:#0b0f14;font-weight:700;font-size:14px;text-decoration:none;padding:12px 22px;border-radius:8px;">Reset Password</a>
+            </p>
+            <p style="margin:0 0 8px;font-size:12px;color:#64748b;">This link expires automatically after use. If you did not ask to reset your password, you can safely ignore this email.</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:14px 24px;background-color:#f8fafc;border-top:1px solid #e2e8f0;font-size:11px;color:#64748b;">
+            HackerRank Campus Crew · Paavai Engineering College · Namakkal
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>`;
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -429,27 +454,89 @@ export const EmailDebugPage: React.FC = () => {
               </p>
             </div>
 
-            <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-[#0B0F14] border border-slate-200 dark:border-slate-800 space-y-2">
-              <div className="flex items-center justify-between gap-2">
+            <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-[#0B0F14] border border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                  Branded Password Reset HTML Message
+                  Branded Password Reset Email Template
                 </p>
-                <button
-                  type="button"
-                  onClick={() => copyValue('body', recommendedPasswordResetBody)}
-                  className="px-2 py-1 rounded border border-slate-300 dark:border-slate-700 font-mono text-[11px] inline-flex items-center gap-1 hover:border-[#00EA64]"
-                >
-                  {copiedKey === 'body' ? (
-                    <Check className="w-3 h-3 text-[#00EA64]" />
-                  ) : (
-                    <Copy className="w-3 h-3" />
-                  )}
-                  <span>Copy HTML</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex items-center p-0.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#121821]">
+                    <button
+                      type="button"
+                      onClick={() => setTemplateViewMode('preview')}
+                      className={`px-2 py-1 rounded text-[11px] font-mono transition-colors ${
+                        templateViewMode === 'preview'
+                          ? 'bg-[#00EA64] text-[#0B0F14] font-semibold'
+                          : 'text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      Visual Preview
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTemplateViewMode('html')}
+                      className={`px-2 py-1 rounded text-[11px] font-mono transition-colors ${
+                        templateViewMode === 'html'
+                          ? 'bg-[#00EA64] text-[#0B0F14] font-semibold'
+                          : 'text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      HTML Source
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => copyValue('body', recommendedPasswordResetBody)}
+                    className="px-2 py-1 rounded border border-slate-300 dark:border-slate-700 font-mono text-[11px] inline-flex items-center gap-1 hover:border-[#00EA64]"
+                  >
+                    {copiedKey === 'body' ? (
+                      <Check className="w-3 h-3 text-[#00EA64]" />
+                    ) : (
+                      <Copy className="w-3 h-3" />
+                    )}
+                    <span>Copy HTML</span>
+                  </button>
+                </div>
               </div>
-              <pre className="p-2.5 rounded bg-slate-100 dark:bg-[#121821] font-mono text-[11px] text-slate-700 dark:text-slate-300 overflow-x-auto whitespace-pre-wrap">
-                {recommendedPasswordResetBody}
-              </pre>
+
+              {templateViewMode === 'preview' ? (
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] overflow-hidden shadow-sm">
+                  <div className="bg-[#0B0F14] px-5 py-4 border-b-2 border-[#00EA64]">
+                    <p className="font-mono text-[11px] font-bold text-[#00EA64]">
+                      HRCC PAAVAI
+                    </p>
+                    <p className="font-mono text-base font-bold text-white mt-1">
+                      Password Reset Request
+                    </p>
+                  </div>
+                  <div className="p-5 space-y-3 text-xs sm:text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
+                    <p>Hello,</p>
+                    <p>
+                      We received a request to reset the password for your{' '}
+                      <strong className="text-slate-900 dark:text-white">
+                        HackerRank Campus Crew – Paavai Engineering College
+                      </strong>{' '}
+                      account (<span className="font-mono">%EMAIL%</span>).
+                    </p>
+                    <div className="pt-1">
+                      <span className="inline-block px-4 py-2.5 rounded-lg bg-[#00EA64] text-[#0B0F14] font-semibold text-xs font-mono">
+                        Reset Password
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      This link expires automatically after use. If you did not ask to reset your
+                      password, you can safely ignore this email.
+                    </p>
+                  </div>
+                  <div className="px-5 py-3 bg-slate-50 dark:bg-[#0B0F14] border-t border-slate-200 dark:border-slate-800 text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                    HackerRank Campus Crew · Paavai Engineering College · Namakkal
+                  </div>
+                </div>
+              ) : (
+                <pre className="p-2.5 rounded bg-slate-100 dark:bg-[#121821] font-mono text-[11px] text-slate-700 dark:text-slate-300 overflow-x-auto whitespace-pre-wrap">
+                  {recommendedPasswordResetBody}
+                </pre>
+              )}
             </div>
           </div>
         </div>

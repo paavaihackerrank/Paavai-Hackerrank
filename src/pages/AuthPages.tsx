@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, EyeOff, MailCheck } from 'lucide-react';
+import { CheckCircle2, Eye, EyeOff, MailCheck } from 'lucide-react';
 import { ACADEMIC_YEARS, DEPARTMENTS, getDashboardPath } from '../config/rbacAndData';
 import {
   isCollegeEmailId,
@@ -25,6 +25,7 @@ export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const rawRedirect = searchParams.get('redirect') || '';
+  const resetCompleted = searchParams.get('reset') === 'success';
   const safeRedirect =
     rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '';
 
@@ -72,10 +73,10 @@ export const LoginPage: React.FC = () => {
           user={firebaseUser}
           onVerified={(path) => navigate(safeRedirect || path, { replace: true })}
         />
-      ) : (
+      ) : !resetMode ? (
         <div
           role="note"
-          className="p-4 rounded-xl border border-amber-500/50 border-l-4 border-l-amber-500 bg-amber-500/10 flex items-start gap-3"
+          className="p-4 rounded-xl border border-amber-500/40 bg-amber-500/10 flex items-start gap-3"
         >
           <MailCheck className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
           <div className="space-y-1 text-xs leading-relaxed">
@@ -89,6 +90,24 @@ export const LoginPage: React.FC = () => {
             </p>
           </div>
         </div>
+      ) : null}
+
+      {resetCompleted && !resetMode && (
+        <div
+          role="status"
+          className="p-4 rounded-xl border border-[#00EA64]/40 bg-[#00EA64]/10 flex items-start gap-3"
+        >
+          <CheckCircle2 className="w-5 h-5 text-[#009942] dark:text-[#00EA64] shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="space-y-0.5 text-xs leading-relaxed">
+            <p className="font-mono font-semibold text-[#009942] dark:text-[#00EA64]">
+              Password Updated
+            </p>
+            <p className="text-slate-700 dark:text-slate-300">
+              Your password reset is complete. Sign in below using your personal email and new
+              password.
+            </p>
+          </div>
+        </div>
       )}
 
       <div className="p-6 sm:p-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] space-y-6">
@@ -97,7 +116,7 @@ export const LoginPage: React.FC = () => {
             Firebase Authentication · Paavai Chapter
           </p>
           <h1 className="font-mono text-2xl font-bold text-slate-900 dark:text-white">
-            {resetMode ? 'Recover Account Access' : 'Sign in to HRCC Paavai'}
+            {resetMode ? 'Account Recovery' : 'Sign in to HRCC Paavai'}
           </h1>
           {!resetMode && (
             <p className="text-xs text-slate-500 dark:text-slate-400">

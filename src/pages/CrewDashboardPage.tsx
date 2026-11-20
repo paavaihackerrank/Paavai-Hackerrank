@@ -1,12 +1,25 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  BookOpen,
+  Calendar,
   Check,
+  ChevronDown,
+  ClipboardList,
   Download,
   Edit3,
+  Image as ImageIcon,
+  LucideIcon,
   Mail,
+  Megaphone,
   Plus,
+  QrCode,
+  Settings,
+  ShieldCheck,
   Trash2,
+  Trophy,
+  UserPlus,
+  Users,
   X,
 } from 'lucide-react';
 import {
@@ -70,6 +83,21 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
   const [activeTab, setActiveTab] = useState<DashboardTab>(
     mode === 'lead' ? 'members' : 'events'
   );
+  const [mobileSectionNavOpen, setMobileSectionNavOpen] = useState(false);
+  const [expandedClusters, setExpandedClusters] = useState<Record<string, boolean>>({
+    community: true,
+    operations: true,
+    governance: true,
+    events_ops: true,
+    content_community: true,
+  });
+
+  const toggleCluster = (clusterId: string) => {
+    setExpandedClusters((prev) => ({
+      ...prev,
+      [clusterId]: !(prev[clusterId] ?? true),
+    }));
+  };
 
   // Event form state
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
@@ -118,23 +146,101 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
   const totalPending = pendingEvents.length + pendingAnnouncements.length;
   const pendingJoinCount = joinRequests.filter((r) => r.status === 'pending').length;
 
-  const tabs: Array<{ id: DashboardTab; label: string; badge?: number }> = [
-    ...(isLead ? [{ id: 'members' as const, label: 'Member Management', badge: users.length }] : []),
-    { id: 'events', label: 'Events' },
-    { id: 'checkins', label: 'QR Check-Ins', badge: eventCheckIns.length },
-    { id: 'announcements', label: 'Announcements' },
-    { id: 'gallery', label: 'Gallery' },
-    { id: 'resources', label: 'Resources' },
-    { id: 'leaderboard', label: 'Leaderboard' },
-    { id: 'registrations', label: 'Registrations' },
-    ...(isLead
-      ? [
-          { id: 'approvals' as const, label: 'Pending Content', badge: totalPending },
-          { id: 'join_requests' as const, label: 'Join Inquiries', badge: pendingJoinCount },
-          { id: 'settings' as const, label: 'Site Settings' },
-        ]
-      : []),
-  ];
+  type TabCluster = {
+    id: string;
+    title: string;
+    items: Array<{
+      id: DashboardTab;
+      label: string;
+      icon: LucideIcon;
+      badge?: number;
+      highlightWhenNonZero?: boolean;
+    }>;
+  };
+
+  const tabClusters: TabCluster[] = isLead
+    ? [
+        {
+          id: 'community',
+          title: 'People & Access',
+          items: [
+            { id: 'members', label: 'Member Management', icon: Users, badge: users.length },
+            {
+              id: 'join_requests',
+              label: 'Join Inquiries',
+              icon: UserPlus,
+              badge: pendingJoinCount,
+              highlightWhenNonZero: true,
+            },
+            { id: 'leaderboard', label: 'Leaderboard', icon: Trophy },
+          ],
+        },
+        {
+          id: 'operations',
+          title: 'Events & Content',
+          items: [
+            { id: 'events', label: 'Events', icon: Calendar },
+            { id: 'checkins', label: 'QR Check-Ins', icon: QrCode, badge: eventCheckIns.length },
+            {
+              id: 'registrations',
+              label: 'Registrations',
+              icon: ClipboardList,
+              badge: registrations.length,
+            },
+            { id: 'announcements', label: 'Announcements', icon: Megaphone },
+            { id: 'gallery', label: 'Gallery', icon: ImageIcon },
+            { id: 'resources', label: 'Resources', icon: BookOpen },
+          ],
+        },
+        {
+          id: 'governance',
+          title: 'Approvals & Settings',
+          items: [
+            {
+              id: 'approvals',
+              label: 'Pending Content',
+              icon: ShieldCheck,
+              badge: totalPending,
+              highlightWhenNonZero: true,
+            },
+            { id: 'settings', label: 'Site Settings', icon: Settings },
+          ],
+        },
+      ]
+    : [
+        {
+          id: 'events_ops',
+          title: 'Events & Attendance',
+          items: [
+            { id: 'events', label: 'Events', icon: Calendar },
+            { id: 'checkins', label: 'QR Check-Ins', icon: QrCode, badge: eventCheckIns.length },
+            {
+              id: 'registrations',
+              label: 'Registrations',
+              icon: ClipboardList,
+              badge: registrations.length,
+            },
+          ],
+        },
+        {
+          id: 'content_community',
+          title: 'Community & Content',
+          items: [
+            { id: 'announcements', label: 'Announcements', icon: Megaphone },
+            { id: 'gallery', label: 'Gallery', icon: ImageIcon },
+            { id: 'resources', label: 'Resources', icon: BookOpen },
+            { id: 'leaderboard', label: 'Leaderboard', icon: Trophy },
+          ],
+        },
+      ];
+
+  const activeClusterAndItem =
+    tabClusters
+      .flatMap((cluster) => cluster.items.map((item) => ({ clusterTitle: cluster.title, item })))
+      .find((entry) => entry.item.id === activeTab) ?? {
+      clusterTitle: tabClusters[0].title,
+      item: tabClusters[0].items[0],
+    };
 
   const handleEventSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -299,37 +405,150 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
         </div>
       </header>
 
-      {/* Dashboard Navigation Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-        {tabs.map((tab) => (
+      {/* Workspace Canvas: Clustered Left Sidebar + Active Panel */}
+      <div className="flex flex-col lg:flex-row items-start gap-6 xl:gap-8">
+        <aside
+          aria-label={isLead ? 'Lead dashboard feature clusters' : 'Crew dashboard feature clusters'}
+          className="w-full lg:w-64 xl:w-[268px] shrink-0 lg:sticky lg:top-20 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] p-3 sm:p-4"
+        >
+          {/* Mobile Section Drawer Toggle */}
           <button
-            key={tab.id}
             type="button"
-            onClick={() => setActiveTab(tab.id)}
-            className={`px-3.5 py-2 rounded-lg text-xs font-mono font-medium transition-colors whitespace-nowrap shrink-0 inline-flex items-center gap-2 ${
-              activeTab === tab.id
-                ? 'bg-[#00EA64] text-[#0B0F14] font-semibold'
-                : 'bg-white dark:bg-[#121821] border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-[#00EA64]/50'
-            }`}
+            onClick={() => setMobileSectionNavOpen((open) => !open)}
+            aria-expanded={mobileSectionNavOpen}
+            className="lg:hidden w-full min-h-[44px] px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0F14] flex items-center justify-between gap-2 text-left"
           >
-            <span>{tab.label}</span>
-            {typeof tab.badge === 'number' && tab.badge > 0 && (
-              <span
-                className={`px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums ${
-                  activeTab === tab.id
-                    ? 'bg-[#0B0F14] text-[#00EA64]'
-                    : 'bg-amber-500/20 text-amber-600 dark:text-amber-300'
-                }`}
-              >
-                {tab.badge}
+            <span className="flex items-center gap-2 min-w-0 whitespace-nowrap">
+              <activeClusterAndItem.item.icon
+                className="w-4 h-4 text-[#009942] dark:text-[#00EA64] shrink-0"
+                aria-hidden="true"
+              />
+              <span className="font-mono text-xs text-slate-500 dark:text-slate-400 shrink-0">
+                {activeClusterAndItem.clusterTitle} ·
               </span>
-            )}
+              <span className="font-mono text-xs font-semibold text-slate-900 dark:text-white truncate">
+                {activeClusterAndItem.item.label}
+              </span>
+            </span>
+            <ChevronDown
+              className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${
+                mobileSectionNavOpen ? 'rotate-180' : ''
+              }`}
+              aria-hidden="true"
+            />
           </button>
-        ))}
-      </div>
 
-      {/* TAB 0: MEMBERS & ROLES (Lead ONLY) */}
-      {activeTab === 'members' && isLead && <MemberDirectoryPanel />}
+          {/* Clustered Single-Line Accordion Navigation List */}
+          <nav
+            aria-label="Dashboard sections"
+            className={`${mobileSectionNavOpen ? 'block mt-3 pt-3 border-t border-slate-200 dark:border-slate-800' : 'hidden'} lg:block space-y-2`}
+          >
+            {tabClusters.map((cluster, clusterIdx) => {
+              const isExpanded = expandedClusters[cluster.id] ?? true;
+              const clusterHasActiveTab = cluster.items.some((item) => item.id === activeTab);
+              const alertCount = cluster.items.reduce(
+                (sum, item) =>
+                  sum + (item.highlightWhenNonZero && typeof item.badge === 'number' ? item.badge : 0),
+                0
+              );
+
+              return (
+                <div
+                  key={cluster.id}
+                  className={
+                    clusterIdx > 0
+                      ? 'pt-2.5 border-t border-slate-200 dark:border-slate-800/80'
+                      : undefined
+                  }
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleCluster(cluster.id)}
+                    aria-expanded={isExpanded}
+                    aria-controls={`dashboard-cluster-${cluster.id}`}
+                    className="w-full min-h-[40px] px-2.5 py-2 rounded-lg flex items-center justify-between gap-2 text-left font-mono text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#18202c] hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap"
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="truncate">{cluster.title}</span>
+                      {!isExpanded && clusterHasActiveTab && (
+                        <span className="text-[10px] font-medium text-[#009942] dark:text-[#00EA64] shrink-0">
+                          · Active
+                        </span>
+                      )}
+                    </span>
+                    <span className="flex items-center gap-2 shrink-0">
+                      {!isExpanded && alertCount > 0 && (
+                        <span className="text-[11px] font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+                          {alertCount}
+                        </span>
+                      )}
+                      {!isExpanded && alertCount === 0 && (
+                        <span className="text-[11px] font-normal tabular-nums text-slate-400 dark:text-slate-500">
+                          {cluster.items.length}
+                        </span>
+                      )}
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 ${
+                          isExpanded ? 'rotate-0' : '-rotate-90'
+                        }`}
+                        aria-hidden="true"
+                      />
+                    </span>
+                  </button>
+
+                  {isExpanded && (
+                    <ul id={`dashboard-cluster-${cluster.id}`} className="mt-1 space-y-1">
+                      {cluster.items.map((item) => {
+                        const Icon = item.icon;
+                        const isActive = activeTab === item.id;
+                        return (
+                          <li key={item.id}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveTab(item.id);
+                                setMobileSectionNavOpen(false);
+                              }}
+                              aria-current={isActive ? 'page' : undefined}
+                              className={`w-full min-h-[40px] px-3 py-2 rounded-lg text-xs font-mono flex items-center justify-between gap-2.5 whitespace-nowrap transition-colors ${
+                                isActive
+                                  ? 'bg-[#00EA64] text-[#0B0F14] font-semibold'
+                                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#18202c] hover:text-slate-900 dark:hover:text-white'
+                              }`}
+                            >
+                              <span className="flex items-center gap-2.5 min-w-0">
+                                <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
+                                <span className="truncate">{item.label}</span>
+                              </span>
+                              {typeof item.badge === 'number' && (
+                                <span
+                                  className={`text-[11px] tabular-nums shrink-0 ${
+                                    isActive
+                                      ? 'text-[#0B0F14]/80 font-bold'
+                                      : item.highlightWhenNonZero && item.badge > 0
+                                        ? 'text-amber-600 dark:text-amber-400 font-semibold'
+                                        : 'text-slate-400 dark:text-slate-500'
+                                  }`}
+                                >
+                                  {item.badge}
+                                </span>
+                              )}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </nav>
+        </aside>
+
+        {/* Active Dashboard Panel */}
+        <div className="flex-1 min-w-0 w-full">
+          {/* TAB 0: MEMBERS & ROLES (Lead ONLY) */}
+          {activeTab === 'members' && isLead && <MemberDirectoryPanel />}
 
       {/* TAB 1: EVENTS MANAGER */}
       {activeTab === 'events' && (
@@ -1264,6 +1483,8 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
 
       {/* TAB 9: SITE SETTINGS (Lead ONLY) */}
       {activeTab === 'settings' && isLead && <SiteSettingsPanel />}
+        </div>
+      </div>
     </div>
   );
 };
