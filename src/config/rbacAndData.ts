@@ -352,6 +352,18 @@ export interface FaqItem {
   answer: string;
 }
 
+export interface EmailSendAttempt {
+  id: string;
+  type: 'verification' | 'password_reset';
+  email: string;
+  status: 'sent' | 'failed';
+  errorCode?: string;
+  errorMessage?: string;
+  continueUrl?: string;
+  actorUid?: string;
+  attemptedAt: string;
+}
+
 /**
  * ============================================================================
  * 3. CHAPTER STATIC ASSETS & DEFAULT SITE SETTINGS

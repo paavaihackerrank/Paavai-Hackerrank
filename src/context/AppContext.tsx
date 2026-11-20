@@ -11,6 +11,7 @@ import {
   ActionCodeSettings,
   User as FirebaseUser,
   applyActionCode,
+  confirmPasswordReset,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
   reload,
@@ -19,6 +20,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
   updateProfile,
+  verifyPasswordResetCode,
 } from 'firebase/auth';
 import {
   collection,
@@ -36,6 +38,7 @@ import {
 import {
   Announcement,
   CampusEvent,
+  EmailSendAttempt,
   EventRegistration,
   GalleryPhoto,
   INITIAL_SITE_SETTINGS,
@@ -116,6 +119,13 @@ interface AppContextValue {
   resendVerificationEmail: () => Promise<{ ok: boolean; error?: string; rateLimited?: boolean }>;
   refreshEmailVerification: () => Promise<AuthActionResult>;
   verifyActionCode: (oobCode: string) => Promise<AuthActionResult>;
+  verifyPasswordResetActionCode: (
+    oobCode: string
+  ) => Promise<{ ok: boolean; email?: string; error?: string }>;
+  confirmPasswordResetAction: (
+    oobCode: string,
+    newPassword: string
+  ) => Promise<{ ok: boolean; error?: string }>;
   syncVerificationAfterRedirect: () => Promise<{
     verified: boolean;
     role?: Exclude<UserRole, 'outsider'>;
@@ -136,6 +146,9 @@ interface AppContextValue {
   registrations: EventRegistration[];
   joinRequests: JoinRequest[];
   completedResourceIds: string[];
+  emailSendAttempts: EmailSendAttempt[];
+  refreshEmailSendAttempts: () => Promise<void>;
+  deleteEmailSendAttempt: (id: string) => Promise<void>;
 
   // Actions — Events
   createEvent: (
@@ -231,16 +244,27 @@ export function setResendCooldownTimestamp(email?: string | null, durationMs = R
   }
 }
 
-async function sendVerificationWithRedirect(user: FirebaseUser): Promise<void> {
+interface EmailDispatchOutcome {
+  continueUrl: string;
+  fallbackCode?: string;
+  fallbackMessage?: string;
+}
+
+async function sendVerificationWithRedirect(user: FirebaseUser): Promise<EmailDispatchOutcome> {
   auth.useDeviceLanguage();
-  if (typeof window !== 'undefined' && window.location?.origin) {
+  const continueUrl =
+    typeof window !== 'undefined' && window.location?.origin
+      ? `${window.location.origin}/verified?verified=true`
+      : '';
+
+  if (continueUrl) {
     const actionCodeSettings: ActionCodeSettings = {
-      url: `${window.location.origin}/verified?verified=true`,
+      url: continueUrl,
       handleCodeInApp: false,
     };
     try {
       await sendEmailVerification(user, actionCodeSettings);
-      return;
+      return { continueUrl };
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code || '';
       if (
@@ -249,12 +273,46 @@ async function sendVerificationWithRedirect(user: FirebaseUser): Promise<void> {
         code === 'auth/missing-continue-uri'
       ) {
         await sendEmailVerification(user);
-        return;
+        return {
+          continueUrl,
+          fallbackCode: `${code} (fallback_without_continue_url)`,
+          fallbackMessage:
+            'Custom continue URL domain is not in Firebase Authorized Domains; sent using default Firebase verification redirect.',
+        };
       }
       throw err;
     }
   }
   await sendEmailVerification(user);
+  return { continueUrl: 'default' };
+}
+
+async function logEmailSendAttempt(entry: {
+  type: 'verification' | 'password_reset';
+  email: string;
+  status: 'sent' | 'failed';
+  errorCode?: string;
+  errorMessage?: string;
+  continueUrl?: string;
+  actorUid?: string;
+}): Promise<void> {
+  try {
+    const attemptId = sanitizeId(
+      `email_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    );
+    await setDoc(doc(db, 'emailSendAttempts', attemptId), {
+      type: entry.type,
+      email: clampStr(entry.email.trim().toLowerCase(), 160),
+      status: entry.status,
+      errorCode: clampStr(entry.errorCode || '', 160),
+      errorMessage: clampStr(entry.errorMessage || '', 500),
+      continueUrl: clampStr(entry.continueUrl || '', 400),
+      actorUid: clampStr(entry.actorUid || '', 128),
+      attemptedAt: new Date().toISOString(),
+    });
+  } catch (logErr) {
+    console.warn('Could not log emailSendAttempt:', logErr);
+  }
 }
 
 export function isAllowedCollegeEmail(email?: string | null): boolean {
@@ -392,6 +450,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [registrations, setRegistrations] = useState<EventRegistration[]>([]);
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [completedResourceIds, setCompletedResourceIds] = useState<string[]>([]);
+  const [emailSendAttempts, setEmailSendAttempts] = useState<EmailSendAttempt[]>([]);
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const cleanupRanForUidRef = useRef<string | null>(null);
@@ -898,11 +957,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsubRegs();
   }, [authReady, firebaseUser, isVerifiedAllowedUser, isRealCrewOrLead]);
 
-  // Lead-only listeners: /users and /join_requests
+  // Lead-only listeners: /users, /join_requests, and /emailSendAttempts
   useEffect(() => {
     if (!authReady || !firebaseUser || !isVerifiedAllowedUser || !isRealCampusLead) {
       setLiveUsers([]);
       setJoinRequests([]);
+      setEmailSendAttempts([]);
       return;
     }
 
@@ -962,9 +1022,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (error) => handleFirestoreError(error, OperationType.LIST, 'join_requests')
     );
 
+    const unsubEmailLogs = onSnapshot(
+      collection(db, 'emailSendAttempts'),
+      (snap) => {
+        const mapped: EmailSendAttempt[] = snap.docs
+          .map((d) => {
+            const x = d.data();
+            return {
+              id: d.id,
+              type: (x.type === 'password_reset' ? 'password_reset' : 'verification') as EmailSendAttempt['type'],
+              email: String(x.email || ''),
+              status: (x.status === 'failed' ? 'failed' : 'sent') as EmailSendAttempt['status'],
+              errorCode: x.errorCode ? String(x.errorCode) : undefined,
+              errorMessage: x.errorMessage ? String(x.errorMessage) : undefined,
+              continueUrl: x.continueUrl ? String(x.continueUrl) : undefined,
+              actorUid: x.actorUid ? String(x.actorUid) : undefined,
+              attemptedAt: String(x.attemptedAt || ''),
+            };
+          })
+          .sort((a, b) => b.attemptedAt.localeCompare(a.attemptedAt));
+        setEmailSendAttempts(mapped);
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'emailSendAttempts')
+    );
+
     return () => {
       unsubUsers();
       unsubJoinReqs();
+      unsubEmailLogs();
     };
   }, [authReady, firebaseUser, isVerifiedAllowedUser, isRealCampusLead]);
 
@@ -1218,12 +1303,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       let emailSent = false;
       let emailErrorMsg = '';
       try {
-        await sendVerificationWithRedirect(cred.user);
+        const dispatchOutcome = await sendVerificationWithRedirect(cred.user);
         emailSent = true;
         setResendCooldownTimestamp(trimmedEmail);
+        void logEmailSendAttempt({
+          type: 'verification',
+          email: trimmedEmail,
+          status: 'sent',
+          errorCode: dispatchOutcome.fallbackCode,
+          errorMessage: dispatchOutcome.fallbackMessage,
+          continueUrl: dispatchOutcome.continueUrl,
+          actorUid: cred.user.uid,
+        });
       } catch (mailErr: unknown) {
         console.error('Failed to send initial verification email:', mailErr);
-        const mailCode = (mailErr as { code?: string })?.code || '';
+        const mailCode = (mailErr as { code?: string })?.code || 'unknown';
         if (mailCode === 'auth/too-many-requests') {
           setResendCooldownTimestamp(trimmedEmail);
         }
@@ -1233,6 +1327,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             : mailErr instanceof Error
               ? mailErr.message
               : 'Could not send verification email.';
+        void logEmailSendAttempt({
+          type: 'verification',
+          email: trimmedEmail,
+          status: 'failed',
+          errorCode: mailCode,
+          errorMessage: emailErrorMsg,
+          continueUrl:
+            typeof window !== 'undefined' && window.location?.origin
+              ? `${window.location.origin}/verified?verified=true`
+              : 'default',
+          actorUid: cred.user.uid,
+        });
       }
 
       const nowISO = new Date().toISOString();
@@ -1316,11 +1422,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         error: 'Enter your registered @paavai.edu.in email address.',
       };
     }
+    const continueUrl =
+      typeof window !== 'undefined' && window.location?.origin
+        ? `${window.location.origin}/login?reset=success`
+        : 'default';
+    let fallbackCode: string | undefined;
+    let fallbackMessage: string | undefined;
+
     try {
       auth.useDeviceLanguage();
-      if (typeof window !== 'undefined' && window.location?.origin) {
+      if (continueUrl !== 'default') {
         const resetActionSettings: ActionCodeSettings = {
-          url: `${window.location.origin}/login`,
+          url: continueUrl,
           handleCodeInApp: false,
         };
         try {
@@ -1332,6 +1445,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             cCode === 'auth/invalid-continue-uri' ||
             cCode === 'auth/missing-continue-uri'
           ) {
+            fallbackCode = `${cCode} (fallback_without_continue_url)`;
+            fallbackMessage =
+              'Continue URL domain is not in Firebase Authorized Domains; sent using default Firebase reset flow.';
             await sendPasswordResetEmail(auth, trimmedEmail);
           } else {
             throw continueErr;
@@ -1340,6 +1456,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else {
         await sendPasswordResetEmail(auth, trimmedEmail);
       }
+      await logEmailSendAttempt({
+        type: 'password_reset',
+        email: trimmedEmail,
+        status: 'sent',
+        errorCode: fallbackCode,
+        errorMessage: fallbackMessage,
+        continueUrl,
+        actorUid: auth.currentUser?.uid || '',
+      });
       addToast(
         'Password reset email sent',
         `Check ${trimmedEmail} (including Spam/Promotions) for your password reset link.`,
@@ -1347,7 +1472,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       return { ok: true };
     } catch (err: unknown) {
-      const code = (err as { code?: string })?.code || '';
+      const code = (err as { code?: string })?.code || 'unknown';
       const errMsg =
         code === 'auth/user-not-found'
           ? 'No account found with this email address.'
@@ -1358,6 +1483,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               : err instanceof Error
                 ? err.message
                 : 'Could not send password reset email.';
+      await logEmailSendAttempt({
+        type: 'password_reset',
+        email: trimmedEmail,
+        status: 'failed',
+        errorCode: code,
+        errorMessage: errMsg,
+        continueUrl,
+        actorUid: auth.currentUser?.uid || '',
+      });
       addToast('Password reset failed', errMsg, 'error');
       return { ok: false, error: errMsg };
     }
@@ -1369,9 +1503,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addToast('Failed to send verification email', msg, 'error');
       return { ok: false, error: msg };
     }
+    const targetEmail = (auth.currentUser.email || '').trim().toLowerCase();
     try {
-      await sendVerificationWithRedirect(auth.currentUser);
+      const dispatchOutcome = await sendVerificationWithRedirect(auth.currentUser);
       setResendCooldownTimestamp(auth.currentUser.email);
+      if (targetEmail && isAllowedCollegeEmail(targetEmail)) {
+        await logEmailSendAttempt({
+          type: 'verification',
+          email: targetEmail,
+          status: 'sent',
+          errorCode: dispatchOutcome.fallbackCode,
+          errorMessage: dispatchOutcome.fallbackMessage,
+          continueUrl: dispatchOutcome.continueUrl,
+          actorUid: auth.currentUser.uid,
+        });
+      }
       addToast(
         'Verification email sent',
         `A verification link has been sent to ${auth.currentUser.email}. Check your inbox (including Spam/Promotions).`,
@@ -1379,7 +1525,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       return { ok: true };
     } catch (err: unknown) {
-      const code = (err as { code?: string })?.code || '';
+      const code = (err as { code?: string })?.code || 'unknown';
       const rateLimited = code === 'auth/too-many-requests';
       if (rateLimited) {
         setResendCooldownTimestamp(auth.currentUser.email);
@@ -1389,6 +1535,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         : err instanceof Error
           ? err.message
           : 'Could not resend verification email.';
+      if (targetEmail && isAllowedCollegeEmail(targetEmail)) {
+        await logEmailSendAttempt({
+          type: 'verification',
+          email: targetEmail,
+          status: 'failed',
+          errorCode: code,
+          errorMessage: errMsg,
+          continueUrl:
+            typeof window !== 'undefined' && window.location?.origin
+              ? `${window.location.origin}/verified?verified=true`
+              : 'default',
+          actorUid: auth.currentUser.uid,
+        });
+      }
       addToast('Failed to send verification email', errMsg, 'error');
       return {
         ok: false,
@@ -1456,6 +1616,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             : err instanceof Error
               ? err.message
               : 'Could not verify your email link.';
+      return { ok: false, error: errMsg };
+    }
+  };
+
+  const verifyPasswordResetActionCode = async (
+    oobCode: string
+  ): Promise<{ ok: boolean; email?: string; error?: string }> => {
+    try {
+      const email = await verifyPasswordResetCode(auth, oobCode);
+      return { ok: true, email };
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      const errMsg =
+        code === 'auth/expired-action-code'
+          ? 'This password reset link has expired. Request a new reset link from Sign In.'
+          : code === 'auth/invalid-action-code'
+            ? 'This password reset link is invalid or has already been used.'
+            : err instanceof Error
+              ? err.message
+              : 'Could not validate password reset link.';
+      return { ok: false, error: errMsg };
+    }
+  };
+
+  const confirmPasswordResetAction = async (
+    oobCode: string,
+    newPassword: string
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      await confirmPasswordReset(auth, oobCode, newPassword);
+      addToast('Password updated', 'Sign in with your new password.', 'success');
+      return { ok: true };
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      const errMsg =
+        code === 'auth/weak-password'
+          ? 'Password must be at least 6 characters.'
+          : code === 'auth/expired-action-code' || code === 'auth/invalid-action-code'
+            ? 'This reset link is invalid or expired. Request a fresh reset email.'
+            : err instanceof Error
+              ? err.message
+              : 'Could not update password.';
+      addToast('Password reset error', errMsg, 'error');
       return { ok: false, error: errMsg };
     }
   };
@@ -2008,6 +2211,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const refreshEmailSendAttempts = async () => {
+    if (!can('canAccessAdminPanel') || !firebaseUser) return;
+    try {
+      const snap = await getDocs(collection(db, 'emailSendAttempts'));
+      const mapped: EmailSendAttempt[] = snap.docs
+        .map((d) => {
+          const x = d.data();
+          return {
+            id: d.id,
+            type: (x.type === 'password_reset' ? 'password_reset' : 'verification') as EmailSendAttempt['type'],
+            email: String(x.email || ''),
+            status: (x.status === 'failed' ? 'failed' : 'sent') as EmailSendAttempt['status'],
+            errorCode: x.errorCode ? String(x.errorCode) : undefined,
+            errorMessage: x.errorMessage ? String(x.errorMessage) : undefined,
+            continueUrl: x.continueUrl ? String(x.continueUrl) : undefined,
+            actorUid: x.actorUid ? String(x.actorUid) : undefined,
+            attemptedAt: String(x.attemptedAt || ''),
+          };
+        })
+        .sort((a, b) => b.attemptedAt.localeCompare(a.attemptedAt));
+      setEmailSendAttempts(mapped);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, 'emailSendAttempts');
+    }
+  };
+
+  const deleteEmailSendAttempt = async (id: string) => {
+    if (!can('canAccessAdminPanel') || !firebaseUser) return;
+    const path = `emailSendAttempts/${id}`;
+    try {
+      await deleteDoc(doc(db, 'emailSendAttempts', id));
+      addToast('Log entry deleted', undefined, 'info');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, path);
+    }
+  };
+
   const updateSiteSettings = async (updates: Partial<SiteSettings>) => {
     if (!can('canManageSiteSettings') || !firebaseUser) return;
     const merged = { ...siteSettings, ...updates };
@@ -2159,6 +2399,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         resendVerificationEmail,
         refreshEmailVerification,
         verifyActionCode,
+        verifyPasswordResetActionCode,
+        confirmPasswordResetAction,
         syncVerificationAfterRedirect,
         logout,
         siteSettings,
@@ -2173,6 +2415,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         registrations,
         joinRequests,
         completedResourceIds,
+        emailSendAttempts,
+        refreshEmailSendAttempts,
+        deleteEmailSendAttempt,
         createEvent,
         updateEvent,
         deleteEvent,

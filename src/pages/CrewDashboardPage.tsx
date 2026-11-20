@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Check,
   Download,
   Edit3,
+  Mail,
   Plus,
   Trash2,
   X,
@@ -280,6 +282,15 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
                 {totalPending}
               </p>
             </div>
+          )}
+          {isLead && (
+            <Link
+              to="/debug/emails"
+              className="px-3 py-2 rounded-lg text-xs font-mono font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#121821] text-slate-700 dark:text-slate-200 hover:border-[#00EA64] transition-colors inline-flex items-center gap-1.5"
+            >
+              <Mail className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
+              <span>Email Debug Logs</span>
+            </Link>
           )}
         </div>
       </header>

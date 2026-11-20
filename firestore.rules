@@ -253,6 +253,23 @@ service cloud.firestore {
         && (!('updatedAt' in data) || isValidTimestampStr(data.updatedAt));
     }
 
+    function isValidEmailSendAttempt(data) {
+      return data.keys().hasAll(['type', 'email', 'status', 'attemptedAt'])
+        && data.keys().hasOnly(['type', 'email', 'status', 'errorCode', 'errorMessage', 'continueUrl', 'actorUid', 'attemptedAt'])
+        && data.type in ['verification', 'password_reset']
+        && isValidEmail(data.email)
+        && (
+          data.email.lower().matches('^[a-z0-9._%+\\-]+@paavai\\.edu\\.in$') ||
+          data.email.lower() in ['622123104144@paavai.edu.in', 'paavaihackerrank@gmail.com']
+        )
+        && data.status in ['sent', 'failed']
+        && (!('errorCode' in data) || (data.errorCode is string && data.errorCode.size() <= 160))
+        && (!('errorMessage' in data) || (data.errorMessage is string && data.errorMessage.size() <= 500))
+        && (!('continueUrl' in data) || (data.continueUrl is string && data.continueUrl.size() <= 400))
+        && (!('actorUid' in data) || (data.actorUid is string && data.actorUid.size() <= 128))
+        && isValidTimestampStr(data.attemptedAt);
+    }
+
     // ------------------------------------------------------------------------
     // COLLECTION MATCH BLOCKS
     // ------------------------------------------------------------------------
@@ -461,6 +478,18 @@ service cloud.firestore {
         && incoming().completedResourceIds.size() <= 200
         && (incoming().completedResourceIds.size() == 0 || incoming().completedResourceIds[0] is string);
       allow delete: if isValidId(userId) && isOwner(userId);
+    }
+
+    // Email Send Attempts (Campus Lead-only PII read/list/delete; immutable audit log)
+    match /emailSendAttempts/{attemptId} {
+      allow get: if isValidId(attemptId) && isCampusLead();
+      allow list: if isCampusLead();
+      allow create: if isValidId(attemptId) && isValidEmailSendAttempt(incoming()) && (
+        incoming().type == 'password_reset' ||
+        hasAllowedCollegeAuth()
+      );
+      allow update: if false;
+      allow delete: if isValidId(attemptId) && isCampusLead();
     }
   }
 }

@@ -207,6 +207,22 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "name", "department", "year"]
+    },
+    "EmailSendAttempt": {
+      "title": "EmailSendAttempt",
+      "description": "Audit log of password reset and verification email dispatch attempts (Campus Lead-only reads).",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["verification", "password_reset"] },
+        "email": { "type": "string", "format": "email", "minLength": 5, "maxLength": 160 },
+        "status": { "type": "string", "enum": ["sent", "failed"] },
+        "errorCode": { "type": "string", "minLength": 0, "maxLength": 160 },
+        "errorMessage": { "type": "string", "minLength": 0, "maxLength": 500 },
+        "continueUrl": { "type": "string", "minLength": 0, "maxLength": 400 },
+        "actorUid": { "type": "string", "minLength": 0, "maxLength": 128 },
+        "attemptedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "email", "status", "attemptedAt"]
     }
   },
   "firestore": {
@@ -257,6 +273,10 @@
     "/user_progress/{userId}": {
       "schema": { "$ref": "#/entities/UserProgress" },
       "description": "Private roadmap completion progress per user."
+    },
+    "/emailSendAttempts/{attemptId}": {
+      "schema": { "$ref": "#/entities/EmailSendAttempt" },
+      "description": "Immutable delivery audit logs for password reset and verification emails; strictly Campus Lead-only readable."
     }
   }
 }

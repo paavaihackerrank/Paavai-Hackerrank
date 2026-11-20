@@ -19,6 +19,8 @@ import { ContactFaqPage } from './pages/ContactFaqPage';
 import { LoginPage, SignUpPage } from './pages/AuthPages';
 import { AccessDeniedPage } from './pages/AccessDeniedPage';
 import { EmailVerifiedPage } from './pages/EmailVerifiedPage';
+import { EmailActionPage } from './pages/EmailActionPage';
+import { EmailDebugPage } from './pages/EmailDebugPage';
 import { WelcomeOnboardingHandler } from './components/WelcomeOnboardingHandler';
 
 const ScrollToTop: React.FC = () => {
@@ -62,6 +64,7 @@ export default function App() {
               <Route path="/signup" element={<SignUpPage />} />
               <Route path="/verified" element={<EmailVerifiedPage />} />
               <Route path="/verify-email" element={<EmailVerifiedPage />} />
+              <Route path="/auth/action" element={<EmailActionPage />} />
               <Route path="/access-denied" element={<AccessDeniedPage />} />
 
               {/* Protected: All Verified Logged-In Roles (pending users see verification banner) */}
@@ -117,6 +120,19 @@ export default function App() {
                     requiredRoleLabel="Campus Lead (Administrator)"
                   >
                     <CrewDashboardPage key="lead" mode="lead" />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/debug/emails"
+                element={
+                  <ProtectedRoute
+                    requireAuth
+                    requiredPermission="canAccessAdminPanel"
+                    requiredRoleLabel="Campus Lead (Administrator)"
+                  >
+                    <EmailDebugPage />
                   </ProtectedRoute>
                 }
               />
