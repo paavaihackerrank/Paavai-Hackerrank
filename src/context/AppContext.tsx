@@ -13,6 +13,7 @@ import {
   onAuthStateChanged,
   reload,
   sendEmailVerification,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
   updateProfile,
@@ -108,6 +109,7 @@ interface AppContextValue {
   can: (permission: PermissionKey) => boolean;
   login: (email: string, password: string) => Promise<AuthActionResult>;
   signup: (payload: SignupPayload) => Promise<AuthActionResult>;
+  sendPasswordReset: (email: string) => Promise<{ ok: boolean; error?: string }>;
   resendVerificationEmail: () => Promise<{ ok: boolean; error?: string }>;
   refreshEmailVerification: () => Promise<AuthActionResult>;
   logout: () => Promise<void>;
@@ -1062,6 +1064,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await reload(cred.user);
 
       if (!cred.user.emailVerified) {
+        setFirebaseUser(cred.user);
         addToast(
           'Email verification required',
           `Check ${cred.user.email} and click the verification link to unlock your dashboard.`,
@@ -1108,6 +1111,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const cred = await createUserWithEmailAndPassword(auth, trimmedEmail, payload.password);
       await updateProfile(cred.user, { displayName: clampStr(payload.name, 100) });
 
+      let emailSent = false;
+      let emailErrorMsg = '';
+      try {
+        auth.useDeviceLanguage();
+        await sendEmailVerification(cred.user);
+        emailSent = true;
+      } catch (mailErr: unknown) {
+        console.error('Failed to send initial verification email:', mailErr);
+        const mailCode = (mailErr as { code?: string })?.code || '';
+        emailErrorMsg =
+          mailCode === 'auth/too-many-requests'
+            ? 'Too many verification requests. Please wait a few minutes and try again.'
+            : mailErr instanceof Error
+              ? mailErr.message
+              : 'Could not send verification email.';
+      }
+
       const nowISO = new Date().toISOString();
       const pendingMeta = {
         name: ensureMinLen(payload.name, 'Paavai Student', 2, 100),
@@ -1146,12 +1166,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('Could not persist unverified user record:', writeErr);
       }
 
-      await sendEmailVerification(cred.user);
-      addToast(
-        'Verification email sent',
-        `Check ${trimmedEmail} for a verification link to activate your account within 12 hours.`,
-        'info'
-      );
+      setFirebaseUser(cred.user);
+
+      if (emailSent) {
+        addToast(
+          'Verification email sent',
+          `Check ${trimmedEmail} (including Spam/Promotions) for your verification link to activate your account within 12 hours.`,
+          'success'
+        );
+      } else {
+        addToast(
+          'Failed to send verification email',
+          `${emailErrorMsg} Click "Resend Verification Email" to send it again.`,
+          'error'
+        );
+      }
       return { ok: true, needsVerification: true };
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code || '';
@@ -1172,22 +1201,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const resendVerificationEmail = async () => {
-    if (!auth.currentUser) {
-      return { ok: false, error: 'No active account session found.' };
-    }
-    try {
-      await sendEmailVerification(auth.currentUser);
-      addToast(
-        'Verification email resent',
-        `Check ${auth.currentUser.email} (including Spam/Promotions).`,
-        'info'
-      );
-      return { ok: true };
-    } catch (err) {
+  const sendPasswordReset = async (email: string): Promise<{ ok: boolean; error?: string }> => {
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail || !isAllowedCollegeEmail(trimmedEmail)) {
       return {
         ok: false,
-        error: err instanceof Error ? err.message : 'Could not resend verification email.',
+        error: 'Enter your registered @paavai.edu.in email address.',
+      };
+    }
+    try {
+      await sendPasswordResetEmail(auth, trimmedEmail);
+      addToast(
+        'Password reset email sent',
+        `Check ${trimmedEmail} (including Spam/Promotions) for your password reset link.`,
+        'success'
+      );
+      return { ok: true };
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/user-not-found') {
+        return { ok: false, error: 'No account found with this email address.' };
+      }
+      if (code === 'auth/invalid-email') {
+        return { ok: false, error: 'Enter a valid @paavai.edu.in email address.' };
+      }
+      if (code === 'auth/too-many-requests') {
+        return { ok: false, error: 'Too many requests. Please wait a few minutes and try again.' };
+      }
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Could not send password reset email.',
+      };
+    }
+  };
+
+  const resendVerificationEmail = async () => {
+    if (!auth.currentUser) {
+      const msg = 'No active account session found. Please sign in first.';
+      addToast('Failed to send verification email', msg, 'error');
+      return { ok: false, error: msg };
+    }
+    try {
+      auth.useDeviceLanguage();
+      await sendEmailVerification(auth.currentUser);
+      addToast(
+        'Verification email sent',
+        `A verification link has been sent to ${auth.currentUser.email}. Check your inbox (including Spam/Promotions).`,
+        'success'
+      );
+      return { ok: true };
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      const errMsg =
+        code === 'auth/too-many-requests'
+          ? 'Too many verification requests. Please wait a few minutes before trying again.'
+          : err instanceof Error
+            ? err.message
+            : 'Could not resend verification email.';
+      addToast('Failed to send verification email', errMsg, 'error');
+      return {
+        ok: false,
+        error: errMsg,
       };
     }
   };
@@ -1837,6 +1911,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         can,
         login,
         signup,
+        sendPasswordReset,
         resendVerificationEmail,
         refreshEmailVerification,
         logout,

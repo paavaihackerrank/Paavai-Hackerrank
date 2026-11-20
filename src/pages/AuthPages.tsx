@@ -3,21 +3,26 @@ import { Link, useNavigate } from 'react-router-dom';
 import { MailCheck } from 'lucide-react';
 import { ACADEMIC_YEARS, DEPARTMENTS, getDashboardPath } from '../config/rbacAndData';
 import { isAllowedCollegeEmail, useApp } from '../context/AppContext';
-import { VerificationBanner } from '../components/VerificationBanner';
+import { NotificationBanner } from '../components/NotificationBanner';
 
 export const LoginPage: React.FC = () => {
   const {
+    firebaseUser,
     currentUser,
     currentRole,
     needsEmailVerification,
     unverifiedEmail,
     login,
+    sendPasswordReset,
   } = useApp();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [resetMode, setResetMode] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetSuccess, setResetSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -25,17 +30,6 @@ export const LoginPage: React.FC = () => {
       navigate(getDashboardPath(currentRole), { replace: true });
     }
   }, [currentUser, currentRole, navigate]);
-
-  if (needsEmailVerification && unverifiedEmail) {
-    return (
-      <div className="max-w-xl mx-auto px-4 sm:px-6 py-16 space-y-6">
-        <VerificationBanner
-          email={unverifiedEmail}
-          onVerified={(path) => navigate(path, { replace: true })}
-        />
-      </div>
-    );
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,24 +55,53 @@ export const LoginPage: React.FC = () => {
     navigate(res.redirectPath || '/dashboard/member', { replace: true });
   };
 
+  const handlePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetEmail = resetEmail.trim();
+    if (!targetEmail || !isAllowedCollegeEmail(targetEmail)) {
+      setError('Enter your registered @paavai.edu.in email address.');
+      setResetSuccess('');
+      return;
+    }
+    setSubmitting(true);
+    setError('');
+    setResetSuccess('');
+    const res = await sendPasswordReset(targetEmail);
+    setSubmitting(false);
+    if (!res.ok) {
+      setError(res.error || 'Could not send password reset email.');
+      return;
+    }
+    setResetSuccess(
+      `Password reset link sent to ${targetEmail.toLowerCase()}. Check your inbox and Spam/Promotions folder.`
+    );
+  };
+
   return (
-    <div className="max-w-md mx-auto px-4 sm:px-6 py-16 space-y-5">
-      <div
-        role="note"
-        className="p-4 rounded-xl border border-amber-500/40 bg-amber-500/10 flex items-start gap-3"
-      >
-        <MailCheck className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
-        <div className="space-y-1 text-xs leading-relaxed">
-          <p className="font-mono font-semibold text-amber-700 dark:text-amber-300">
-            Email Verification Required to Activate Account
-          </p>
-          <p className="text-slate-700 dark:text-slate-300">
-            New members must check their <strong>@paavai.edu.in</strong> email for a verification
-            link to activate their account. Unverified accounts are automatically deleted after{' '}
-            <strong>12 hours</strong>.
-          </p>
+    <div className="max-w-lg mx-auto px-4 sm:px-6 py-14 space-y-5">
+      {needsEmailVerification && unverifiedEmail ? (
+        <NotificationBanner
+          user={firebaseUser}
+          onVerified={(path) => navigate(path, { replace: true })}
+        />
+      ) : (
+        <div
+          role="note"
+          className="p-4 rounded-xl border border-amber-500/50 border-l-4 border-l-amber-500 bg-amber-500/10 flex items-start gap-3"
+        >
+          <MailCheck className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="space-y-1 text-xs leading-relaxed">
+            <p className="font-mono font-semibold text-amber-700 dark:text-amber-300">
+              Email Verification Required to Activate Account
+            </p>
+            <p className="text-slate-700 dark:text-slate-300">
+              Signed up recently? Check your <strong>@paavai.edu.in</strong> inbox for a
+              verification link to activate your account. Unverified accounts are automatically
+              deleted after <strong>12 hours</strong>.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="p-6 sm:p-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] space-y-6">
         <div className="space-y-1.5">
@@ -86,11 +109,20 @@ export const LoginPage: React.FC = () => {
             Firebase Authentication · Paavai Chapter
           </p>
           <h1 className="font-mono text-2xl font-bold text-slate-900 dark:text-white">
-            Sign in to HRCC Paavai
+            {resetMode ? 'Reset Your Password' : 'Sign in to HRCC Paavai'}
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Sign in with your verified <strong>@paavai.edu.in</strong> college email to open your
-            dashboard immediately.
+            {resetMode ? (
+              <>
+                Enter your registered <strong>@paavai.edu.in</strong> email and we will send you a
+                Firebase password reset link.
+              </>
+            ) : (
+              <>
+                Sign in with your verified <strong>@paavai.edu.in</strong> college email to open your
+                dashboard immediately.
+              </>
+            )}
           </p>
         </div>
 
@@ -103,49 +135,114 @@ export const LoginPage: React.FC = () => {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} noValidate className="space-y-4">
-          <div>
-            <label
-              htmlFor="login-email"
-              className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1.5"
-            >
-              Paavai College Email
-            </label>
-            <input
-              id="login-email"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="student@paavai.edu.in"
-              className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
-            />
-          </div>
-          <div>
-            <label
-              htmlFor="login-password"
-              className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1.5"
-            >
-              Password
-            </label>
-            <input
-              id="login-password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60"
+        {resetSuccess && (
+          <div
+            role="status"
+            className="p-3 rounded-lg text-xs font-medium bg-[#00EA64]/10 border border-[#00EA64]/30 text-[#009942] dark:text-[#00EA64] leading-relaxed"
           >
-            {submitting ? 'Signing in...' : 'Sign in with Email'}
-          </button>
-        </form>
+            {resetSuccess}
+          </div>
+        )}
+
+        {resetMode ? (
+          <form onSubmit={handlePasswordReset} noValidate className="space-y-4">
+            <div>
+              <label
+                htmlFor="reset-email"
+                className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1.5"
+              >
+                Registered Paavai Email
+              </label>
+              <input
+                id="reset-email"
+                type="email"
+                autoComplete="email"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                placeholder="student@paavai.edu.in"
+                className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60"
+            >
+              {submitting ? 'Sending Reset Link...' : 'Send Password Reset Email'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setResetMode(false);
+                setError('');
+                setResetSuccess('');
+              }}
+              className="w-full py-2 text-xs font-mono text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
+            >
+              ← Back to Sign In
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleSubmit} noValidate className="space-y-4">
+            <div>
+              <label
+                htmlFor="login-email"
+                className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1.5"
+              >
+                Paavai College Email
+              </label>
+              <input
+                id="login-email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="student@paavai.edu.in"
+                className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label
+                  htmlFor="login-password"
+                  className="block text-xs font-mono text-slate-600 dark:text-slate-300"
+                >
+                  Password
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResetMode(true);
+                    setResetEmail(email);
+                    setError('');
+                    setResetSuccess('');
+                  }}
+                  className="text-xs font-mono text-[#009942] dark:text-[#00EA64] hover:underline"
+                >
+                  Forgot password?
+                </button>
+              </div>
+              <input
+                id="login-password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60"
+            >
+              {submitting ? 'Signing in...' : 'Sign in with Email'}
+            </button>
+          </form>
+        )}
 
         <p className="text-xs text-center text-slate-500 dark:text-slate-400">
           New to Paavai HackerRank Crew?{' '}
@@ -160,6 +257,7 @@ export const LoginPage: React.FC = () => {
 
 export const SignUpPage: React.FC = () => {
   const {
+    firebaseUser,
     currentUser,
     currentRole,
     needsEmailVerification,
@@ -191,8 +289,8 @@ export const SignUpPage: React.FC = () => {
   if (needsEmailVerification && unverifiedEmail) {
     return (
       <div className="max-w-xl mx-auto px-4 sm:px-6 py-16 space-y-6">
-        <VerificationBanner
-          email={unverifiedEmail}
+        <NotificationBanner
+          user={firebaseUser}
           onVerified={(path) => navigate(path, { replace: true })}
         />
       </div>

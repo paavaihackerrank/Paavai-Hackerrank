@@ -18,78 +18,56 @@ const db =
 const auth = getAuth(app);
 
 /**
- * Scheduled Cloud Function: runs every hour to find and delete user accounts
- * in Firestore whose `emailVerified` is `false` for more than 12 hours, along
- * with their corresponding Firebase Auth accounts.
+ * Scheduled Cloud Function: runs every 24 hours to query all Firestore users
+ * where `emailVerified` is `false` and `createdAt` is older than 12 hours,
+ * then deletes those Firestore documents and their corresponding Auth accounts.
  */
 export const cleanupUnverifiedUsers = onSchedule(
   {
-    schedule: 'every 60 minutes',
+    schedule: 'every 24 hours',
     timeZone: 'Asia/Kolkata',
     region: 'asia-south1',
   },
   async () => {
-    const cutoffMs = Date.now() - UNVERIFIED_EXPIRATION_MS;
+    const cutoffISO = new Date(Date.now() - UNVERIFIED_EXPIRATION_MS).toISOString();
 
     const snapshot = await db
       .collection('users')
       .where('emailVerified', '==', false)
+      .where('createdAt', '<=', cutoffISO)
       .get();
 
     if (snapshot.empty) {
-      logger.info('No unverified user documents found.');
+      logger.info(`No unverified user accounts older than ${cutoffISO} found.`);
       return;
     }
 
-    const expiredDocs = snapshot.docs.filter((docSnap) => {
-      const data = docSnap.data();
-      const rawTimestamp =
-        typeof data.createdAt === 'string' && data.createdAt
-          ? data.createdAt
-          : typeof data.updatedAt === 'string' && data.updatedAt
-            ? data.updatedAt
-            : null;
-
-      const createdMs = rawTimestamp
-        ? Date.parse(rawTimestamp)
-        : docSnap.createTime.toMillis();
-
-      return Number.isFinite(createdMs) && createdMs <= cutoffMs;
-    });
-
-    if (expiredDocs.length === 0) {
-      logger.info(
-        `Checked ${snapshot.size} unverified user(s); none older than 12 hours.`
-      );
-      return;
-    }
-
-    // Delete expired Firestore user records in batches of up to 400
-    for (let i = 0; i < expiredDocs.length; i += 400) {
+    // Delete expired Firestore user documents in batches of up to 400
+    for (let i = 0; i < snapshot.docs.length; i += 400) {
       const batch = db.batch();
-      const chunk = expiredDocs.slice(i, i + 400);
+      const chunk = snapshot.docs.slice(i, i + 400);
       for (const docSnap of chunk) {
         batch.delete(docSnap.ref);
       }
       await batch.commit();
     }
 
-    // Delete corresponding Firebase Auth users so stale unverified accounts cannot sign in
+    // Delete corresponding Firebase Auth accounts
     let authDeleted = 0;
-    for (const docSnap of expiredDocs) {
+    for (const docSnap of snapshot.docs) {
       try {
         await auth.deleteUser(docSnap.id);
         authDeleted += 1;
       } catch (err: unknown) {
         const code = (err as { code?: string })?.code;
         if (code !== 'auth/user-not-found') {
-          logger.warn(`Failed to delete Firebase Auth user ${docSnap.id}:`, err);
+          logger.warn(`Failed to delete Firebase Auth account ${docSnap.id}:`, err);
         }
       }
     }
 
     logger.info(
-      `Deleted ${expiredDocs.length} unverified Firestore user document(s) and ${authDeleted} Firebase Auth user(s) older than 12 hours.`
+      `Deleted ${snapshot.size} unverified Firestore user document(s) and ${authDeleted} Firebase Auth account(s) created before ${cutoffISO}.`
     );
   }
 );

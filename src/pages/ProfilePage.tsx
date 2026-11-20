@@ -3,10 +3,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Calendar, CheckCircle2 } from 'lucide-react';
 import { ACADEMIC_YEARS, DEPARTMENTS, ROLE_META } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
-import { VerificationBanner } from '../components/VerificationBanner';
+import { NotificationBanner } from '../components/NotificationBanner';
 
 export const ProfilePage: React.FC = () => {
   const {
+    firebaseUser,
     currentUser,
     needsEmailVerification,
     unverifiedEmail,
@@ -38,23 +39,23 @@ export const ProfilePage: React.FC = () => {
 
   if (needsEmailVerification && unverifiedEmail) {
     return (
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-14 space-y-6">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-14 space-y-6">
+        <NotificationBanner
+          user={firebaseUser}
+          onVerified={(path) => navigate(path, { replace: true })}
+        />
+
         <header className="space-y-1.5 border-b border-slate-200 dark:border-slate-800 pb-5">
           <p className="font-mono text-xs font-semibold text-amber-600 dark:text-amber-400">
-            Account Activation Required
+            Account Activation Pending · Verification Required
           </p>
           <h1 className="font-mono text-3xl font-bold text-slate-900 dark:text-white">
             Member Profile
           </h1>
           <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
-            {unverifiedEmail} · Pending Email Verification
+            {unverifiedEmail} · Verify your email link to unlock profile editing and event registration
           </p>
         </header>
-
-        <VerificationBanner
-          email={unverifiedEmail}
-          onVerified={(path) => navigate(path, { replace: true })}
-        />
       </div>
     );
   }
@@ -82,6 +83,12 @@ export const ProfilePage: React.FC = () => {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-14 space-y-10">
+      <NotificationBanner
+        user={currentUser}
+        onVerified={(path) => navigate(path, { replace: true })}
+        compact
+      />
+
       <header className="space-y-2 border-b border-slate-200 dark:border-slate-800 pb-6">
         <p className="font-mono text-xs font-semibold text-[#009942] dark:text-[#00EA64]">
           {ROLE_META[currentUser.role].label} · Verified @paavai.edu.in

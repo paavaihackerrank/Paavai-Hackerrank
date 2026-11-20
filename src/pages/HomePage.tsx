@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowRight, Calendar, ChevronRight, Code2, Megaphone, Trophy, Users } from 'lucide-react';
-import { CHAPTER_IMAGES, ROLE_META } from '../config/rbacAndData';
+import { CHAPTER_IMAGES } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 import { SafeImage } from '../components/SafeImage';
 
@@ -14,7 +14,6 @@ export const HomePage: React.FC = () => {
     leaderboard,
     resources,
     teamMembers,
-    currentRole,
     currentUser,
     can,
   } = useApp();
@@ -120,21 +119,6 @@ export const HomePage: React.FC = () => {
                 >
                   Explore Events
                 </Link>
-              </div>
-
-              <div className="pt-2 text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span>Viewing as {ROLE_META[currentRole].label}</span>
-                {currentUser ? (
-                  <>
-                    <span aria-hidden="true">·</span>
-                    <span>Signed in: {currentUser.name}</span>
-                  </>
-                ) : (
-                  <>
-                    <span aria-hidden="true">·</span>
-                    <span>Sign in with your @paavai.edu.in email for full member access</span>
-                  </>
-                )}
               </div>
             </motion.div>
 
