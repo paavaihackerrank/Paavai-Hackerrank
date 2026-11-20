@@ -10,13 +10,16 @@ import {
   Trophy,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { MemberAvatar } from './MemberAvatar';
 
 interface SpotlightCandidate {
   key: string;
+  profileId: string;
   name: string;
   department: string;
   year: string;
   bio: string;
+  photoUrl?: string;
   designation?: string;
   hackerRankHandle?: string;
   hackerRankUrl?: string;
@@ -57,10 +60,12 @@ export const MemberSpotlight: React.FC = () => {
       const key = normalize(p.hackerRankHandle) || p.uid;
       map.set(key, {
         key,
+        profileId: p.uid || p.id,
         name: p.name,
         department: p.department,
         year: p.year,
         bio: p.bio,
+        photoUrl: p.photoUrl,
         hackerRankHandle: p.hackerRankHandle,
         hackerRankUrl: p.hackerRankUrl,
         githubUrl: p.githubUrl,
@@ -88,6 +93,7 @@ export const MemberSpotlight: React.FC = () => {
         const key = handleKey || `lb_${entry.id}`;
         map.set(key, {
           key,
+          profileId: entry.hackerRankHandle || entry.id,
           name: entry.name,
           department: entry.department,
           year: entry.year,
@@ -115,14 +121,17 @@ export const MemberSpotlight: React.FC = () => {
       if (existing) {
         existing.designation = tm.designation;
         if (!existing.bio && tm.bio) existing.bio = tm.bio;
+        if (!existing.photoUrl && tm.photoUrl) existing.photoUrl = tm.photoUrl;
       } else {
         const key = handleKey || `tm_${tm.id}`;
         map.set(key, {
           key,
+          profileId: tm.uid || tm.id,
           name: tm.name,
           department: tm.department,
           year: tm.year,
           bio: tm.bio || `${tm.designation} at HackerRank Campus Crew Paavai.`,
+          photoUrl: tm.photoUrl,
           designation: tm.designation,
           hackerRankHandle: tm.hackerRankHandle,
           skills: ['Mentorship', 'DSA'],
@@ -146,13 +155,6 @@ export const MemberSpotlight: React.FC = () => {
     return null;
   }
 
-  const initials = spotlight.name
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() || '')
-    .join('');
-
   return (
     <section
       aria-labelledby="member-spotlight-heading"
@@ -173,15 +175,24 @@ export const MemberSpotlight: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-xl bg-[#00EA64] text-[#0B0F14] font-mono text-lg font-bold flex items-center justify-center shrink-0">
-              {initials || 'PC'}
-            </div>
+            <MemberAvatar
+              name={spotlight.name}
+              photoUrl={spotlight.photoUrl}
+              variant={spotlight.designation?.includes('Lead') ? 'lead' : 'crew'}
+              sizeClass="w-14 h-14"
+              textClass="text-lg"
+            />
             <div className="min-w-0">
               <h2
                 id="member-spotlight-heading"
                 className="font-mono text-2xl font-bold text-slate-900 dark:text-white truncate"
               >
-                {spotlight.name}
+                <Link
+                  to={`/members/${encodeURIComponent(spotlight.profileId)}`}
+                  className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors"
+                >
+                  {spotlight.name}
+                </Link>
               </h2>
               <p className="text-xs sm:text-sm font-mono text-slate-500 dark:text-slate-400">
                 {spotlight.department} · {spotlight.year}

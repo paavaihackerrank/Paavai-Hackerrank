@@ -3,6 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Calendar, CheckCircle2, Clock, Lock, MapPin, QrCode, Users, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { SafeImage } from '../components/SafeImage';
+import { PageSeo, toAbsoluteUrl } from '../components/PageSeo';
+import { CHAPTER_IMAGES } from '../config/rbacAndData';
 
 function formatCountdown(targetISO: string, nowMs: number) {
   const diff = new Date(targetISO).getTime() - nowMs;
@@ -58,8 +60,32 @@ export const EventsPage: React.FC = () => {
     });
   }, [approvedEvents, filter, nowMs, queryFilter]);
 
+  const nextEvent = approvedEvents.find((e) => new Date(e.dateISO).getTime() > nowMs) || approvedEvents[0];
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 space-y-10">
+      <PageSeo
+        title={queryFilter ? `Events matching "${queryFilter}"` : 'Events & Coding Sprints'}
+        description={
+          queryFilter
+            ? `Browse ${filteredEvents.length} HackerRank Campus Crew coding events matching "${queryFilter}" at Paavai Engineering College.`
+            : `Browse ${approvedEvents.length} upcoming coding contests, DSA workshops, and hackathons hosted by HackerRank Campus Crew at Paavai Engineering College.`
+        }
+        canonicalPath="/events"
+        image={nextEvent?.bannerImage || CHAPTER_IMAGES.hackathonArena}
+        keywords={['Coding Contests', 'DSA Workshops', 'Hackathons', 'Paavai Events']}
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'ItemList',
+          name: 'HackerRank Campus Crew Events',
+          itemListElement: approvedEvents.slice(0, 10).map((ev, index) => ({
+            '@type': 'ListItem',
+            position: index + 1,
+            url: toAbsoluteUrl(`/events/${encodeURIComponent(ev.id)}`),
+            name: ev.title,
+          })),
+        }}
+      />
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="space-y-3 max-w-2xl">
           <p className="font-mono text-xs font-semibold text-[#009942] dark:text-[#00EA64]">
@@ -174,7 +200,12 @@ export const EventsPage: React.FC = () => {
                 <div className="p-6 flex-1 flex flex-col justify-between gap-5">
                   <div className="space-y-3">
                     <h2 className="font-mono text-xl font-bold text-slate-900 dark:text-white">
-                      {ev.title}
+                      <Link
+                        to={`/events/${encodeURIComponent(ev.id)}`}
+                        className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors"
+                      >
+                        {ev.title}
+                      </Link>
                     </h2>
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-500 dark:text-slate-400">
@@ -226,11 +257,19 @@ export const EventsPage: React.FC = () => {
                     )}
 
                     {/* Action Row */}
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                        <Users className="w-3.5 h-3.5" aria-hidden="true" />
-                        Host: {ev.createdByName}
-                      </span>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                          <Users className="w-3.5 h-3.5" aria-hidden="true" />
+                          Host: {ev.createdByName}
+                        </span>
+                        <Link
+                          to={`/events/${encodeURIComponent(ev.id)}`}
+                          className="text-xs font-mono text-[#009942] dark:text-[#00EA64] hover:underline whitespace-nowrap"
+                        >
+                          View Details →
+                        </Link>
+                      </div>
 
                       {isPast ? (
                         <span className="text-xs font-mono text-slate-500">Registration closed</span>

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Clock, HelpCircle, Mail, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, HelpCircle, Loader2, Mail, RefreshCw } from 'lucide-react';
 import {
   getResendCooldownStorageKey,
   setResendCooldownTimestamp,
@@ -43,8 +43,14 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
   onVerified,
   compact = false,
 }) => {
-  const { firebaseUser, currentUser, resendVerificationEmail, refreshEmailVerification, logout } =
-    useApp();
+  const {
+    firebaseUser,
+    currentUser,
+    verificationDispatchState,
+    resendVerificationEmail,
+    refreshEmailVerification,
+    logout,
+  } = useApp();
   const [checking, setChecking] = useState(false);
   const [resending, setResending] = useState(false);
   const [message, setMessage] = useState('');
@@ -53,6 +59,7 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
 
   const targetUser = user !== undefined ? user : (firebaseUser ?? currentUser);
   const targetEmail = targetUser?.email || '';
+  const targetEmailLower = targetEmail.trim().toLowerCase();
 
   const [cooldownSeconds, setCooldownSeconds] = useState<number>(() =>
     readRemainingSeconds(targetEmail)
@@ -76,12 +83,34 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
   }
 
   const email = targetEmail || 'your registered email';
-  const busy = checking || resending;
+  const dispatchForThisUser =
+    verificationDispatchState.email &&
+    verificationDispatchState.email === targetEmailLower
+      ? verificationDispatchState
+      : null;
+  const isSendingNow = resending || dispatchForThisUser?.status === 'sending';
+  const busy = checking || isSendingNow;
   const isCoolingDown = cooldownSeconds > 0;
   const cooldownProgress = Math.min(
     100,
     Math.max(0, Math.round(((COOLDOWN_SECONDS - cooldownSeconds) / COOLDOWN_SECONDS) * 100))
   );
+
+  const effectiveMessage =
+    message ||
+    (dispatchForThisUser?.status === 'sent'
+      ? `Verification email sent automatically to ${email}${
+          dispatchForThisUser.dispatchedAt ? ` at ${dispatchForThisUser.dispatchedAt}` : ''
+        }.${
+          dispatchForThisUser.fallbackWarning
+            ? ` Note: ${dispatchForThisUser.fallbackWarning}`
+            : ''
+        } Check your Inbox, Spam, or Promotions folder.`
+      : '');
+
+  const effectiveError =
+    error ||
+    (dispatchForThisUser?.status === 'failed' ? dispatchForThisUser.error || '' : '');
 
   const handleCheckVerified = async () => {
     setChecking(true);
@@ -136,7 +165,7 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
       <div
         role="alert"
         aria-live="assertive"
-        className={`rounded-xl border border-amber-500/70 border-l-4 border-l-amber-500 bg-amber-500/12 dark:bg-amber-500/10 ${
+        className={`rounded-xl border border-amber-500/70 bg-amber-500/12 dark:bg-amber-500/10 ${
           compact ? 'p-4 sm:p-5' : 'p-5 sm:p-6'
         } space-y-4`}
       >
@@ -160,18 +189,26 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
           </div>
         </div>
 
-        {error && (
+        {isSendingNow && !effectiveMessage && !effectiveError && (
+          <div className="p-3 rounded-lg text-xs font-medium bg-sky-500/10 border border-sky-500/30 text-sky-700 dark:text-sky-300 leading-relaxed flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin shrink-0" aria-hidden="true" />
+            <span>Sending verification email to {email} right now...</span>
+          </div>
+        )}
+
+        {effectiveError && (
           <div
             role="alert"
             className="p-3 rounded-lg text-xs font-medium bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 leading-relaxed"
           >
-            {error}
+            {effectiveError}
           </div>
         )}
 
-        {message && (
-          <div className="p-3 rounded-lg text-xs font-medium bg-[#00EA64]/10 border border-[#00EA64]/30 text-[#009942] dark:text-[#00EA64] leading-relaxed">
-            {message}
+        {effectiveMessage && (
+          <div className="p-3 rounded-lg text-xs font-medium bg-[#00EA64]/10 border border-[#00EA64]/30 text-[#009942] dark:text-[#00EA64] leading-relaxed flex items-start gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+            <span>{effectiveMessage}</span>
           </div>
         )}
 
@@ -215,7 +252,7 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
           >
             <Mail className="w-3.5 h-3.5" aria-hidden="true" />
             <span className="tabular-nums">
-              {resending
+              {isSendingNow
                 ? 'Sending...'
                 : isCoolingDown
                   ? `Resend Verification Email (${cooldownSeconds}s)`
@@ -248,11 +285,11 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
         onClose={() => setTroubleshootOpen(false)}
         email={email}
         checking={checking}
-        resending={resending}
+        resending={isSendingNow}
         isCoolingDown={isCoolingDown}
         cooldownSeconds={cooldownSeconds}
-        feedbackMessage={message}
-        feedbackError={error}
+        feedbackMessage={effectiveMessage}
+        feedbackError={effectiveError}
         onResend={handleResend}
         onCheckVerified={handleCheckVerified}
         onSwitchEmail={logout}

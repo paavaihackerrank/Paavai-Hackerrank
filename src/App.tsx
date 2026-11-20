@@ -22,6 +22,8 @@ import { EmailVerifiedPage } from './pages/EmailVerifiedPage';
 import { EmailActionPage } from './pages/EmailActionPage';
 import { EmailDebugPage } from './pages/EmailDebugPage';
 import { EventCheckInPage } from './pages/EventCheckInPage';
+import { EventDetailPage } from './pages/EventDetailPage';
+import { MemberProfileDetailPage } from './pages/MemberProfileDetailPage';
 import { WelcomeOnboardingHandler } from './components/WelcomeOnboardingHandler';
 
 const ScrollToTop: React.FC = () => {
@@ -53,7 +55,9 @@ export default function App() {
               {/* Public Pages */}
               <Route path="/" element={<HomePage />} />
               <Route path="/team" element={<TeamPage />} />
+              <Route path="/members/:memberId" element={<MemberProfileDetailPage />} />
               <Route path="/events" element={<EventsPage />} />
+              <Route path="/events/:eventId" element={<EventDetailPage />} />
               <Route path="/checkin" element={<EventCheckInPage />} />
               <Route path="/leaderboard" element={<LeaderboardPage />} />
               <Route path="/resources" element={<ResourcesPage />} />

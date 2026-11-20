@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Circle, ExternalLink, Lock, X } from 'lucide-react';
-import { ResourceTrack } from '../config/rbacAndData';
+import { ResourceTrack, CHAPTER_IMAGES } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
+import { PageSeo } from '../components/PageSeo';
 
 const TRACKS: Array<'All' | ResourceTrack> = [
   'All',
@@ -38,6 +39,13 @@ export const ResourcesPage: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 space-y-10">
+      <PageSeo
+        title={queryFilter ? `Roadmap: "${queryFilter}"` : 'Learning Roadmap & Practice Sheets'}
+        description={`Explore ${resources.length} curated practice tracks across DSA, Python, Java, SQL, and Problem Solving by HackerRank Campus Crew at Paavai Engineering College.`}
+        canonicalPath="/resources"
+        image={CHAPTER_IMAGES.dsaWorkshop}
+        keywords={['DSA Roadmap', 'Python Track', 'Java Practice', 'SQL Problems', 'Paavai']}
+      />
       <header className="space-y-4">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div className="space-y-3 max-w-2xl">

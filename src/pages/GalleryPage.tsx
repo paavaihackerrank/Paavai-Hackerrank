@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Plus, Trash2, X } from 'lucide-react';
 import { CHAPTER_IMAGES, GalleryPhoto } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 import { SafeImage } from '../components/SafeImage';
+import { PageSeo } from '../components/PageSeo';
 
 export const GalleryPage: React.FC = () => {
   const { gallery, can, addGalleryPhoto, deleteGalleryPhoto } = useApp();
@@ -60,6 +61,13 @@ export const GalleryPage: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 space-y-10">
+      <PageSeo
+        title="Event Gallery"
+        description={`Browse ${gallery.length} campus highlights from HackerRank Campus Crew hackathons, DSA workshops, and award ceremonies at Paavai Engineering College.`}
+        canonicalPath="/gallery"
+        image={gallery[0]?.imageUrl || CHAPTER_IMAGES.hackathonArena}
+        keywords={['Hackathon Photos', 'Paavai Gallery', 'Coding Workshops']}
+      />
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="space-y-3 max-w-2xl">
           <p className="font-mono text-xs font-semibold text-[#009942] dark:text-[#00EA64]">

@@ -3,6 +3,7 @@ import {
   Check,
   Download,
   Filter,
+  Image as ImageIcon,
   Loader2,
   RotateCcw,
   Search,
@@ -15,16 +16,28 @@ import {
   ROLE_META,
   UserRole,
 } from '../config/rbacAndData';
-import { useApp } from '../context/AppContext';
+import { isValidOptionalImageUrl, useApp } from '../context/AppContext';
+import { MemberAvatar } from '../components/MemberAvatar';
 
 export const MemberDirectoryPanel: React.FC = () => {
-  const { currentUser, users, can, addToast, updateUserRole, deleteUser } = useApp();
+  const {
+    currentUser,
+    users,
+    can,
+    addToast,
+    updateUserRole,
+    updateMemberPhotoUrl,
+    deleteUser,
+  } = useApp();
   const [search, setSearch] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
   const [yearFilter, setYearFilter] = useState<string>('all');
   const [roleFilter, setRoleFilter] = useState<'all' | Exclude<UserRole, 'outsider'>>('all');
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [editingPhotoUserId, setEditingPhotoUserId] = useState<string | null>(null);
+  const [photoDraftUrl, setPhotoDraftUrl] = useState('');
+  const [savingPhoto, setSavingPhoto] = useState(false);
 
   const departmentOptions = useMemo(() => {
     const seen = new Set(DEPARTMENTS.map((d) => d.toLowerCase()));
@@ -404,31 +417,89 @@ export const MemberDirectoryPanel: React.FC = () => {
                     className="hover:bg-slate-50/70 dark:hover:bg-[#0E141C]/60 transition-colors"
                   >
                     <td className="py-3.5 px-4">
-                      <p className="font-semibold text-slate-900 dark:text-white">
-                        {user.name}{' '}
-                        {isSelf && (
-                          <span className="font-mono text-[11px] text-[#009942] dark:text-[#00EA64]">
-                            (You)
-                          </span>
-                        )}
-                        {user.emailVerified === false && (
-                          <span className="ml-1.5 font-mono text-[11px] text-amber-600 dark:text-amber-400">
-                            · Pending Verification
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{user.email}</p>
-                      {user.collegeEmail &&
-                        user.collegeEmail.toLowerCase() !== user.email.toLowerCase() && (
-                          <p className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                            ID: {user.collegeEmail}
+                      <div className="flex items-start gap-3">
+                        <MemberAvatar
+                          name={user.name}
+                          photoUrl={user.photoUrl}
+                          variant={user.role}
+                          sizeClass="w-10 h-10"
+                          roundedClass="rounded-lg"
+                          textClass="text-xs"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-slate-900 dark:text-white">
+                            {user.name}{' '}
+                            {isSelf && (
+                              <span className="font-mono text-[11px] text-[#009942] dark:text-[#00EA64]">
+                                (You)
+                              </span>
+                            )}
+                            {user.emailVerified === false && (
+                              <span className="ml-1.5 font-mono text-[11px] text-amber-600 dark:text-amber-400">
+                                · Pending Verification
+                              </span>
+                            )}
                           </p>
-                        )}
-                      {user.hackerRankHandle && (
-                        <p className="font-mono text-[11px] text-slate-400 dark:text-slate-500">
-                          {user.hackerRankHandle}
-                        </p>
-                      )}
+                          <p className="text-xs text-slate-500 dark:text-slate-400">{user.email}</p>
+                          {user.collegeEmail &&
+                            user.collegeEmail.toLowerCase() !== user.email.toLowerCase() && (
+                              <p className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                                ID: {user.collegeEmail}
+                              </p>
+                            )}
+                          {user.hackerRankHandle && (
+                            <p className="font-mono text-[11px] text-slate-400 dark:text-slate-500">
+                              {user.hackerRankHandle}
+                            </p>
+                          )}
+                          {editingPhotoUserId === user.id && (
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              <input
+                                type="url"
+                                value={photoDraftUrl}
+                                onChange={(e) => setPhotoDraftUrl(e.target.value)}
+                                placeholder="https://example.com/photo.jpg"
+                                aria-label={`Image URL for ${user.name}`}
+                                className="h-8 px-2.5 rounded-md text-xs font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700 min-w-[210px] flex-1"
+                              />
+                              <button
+                                type="button"
+                                disabled={savingPhoto}
+                                onClick={async () => {
+                                  if (!isValidOptionalImageUrl(photoDraftUrl)) {
+                                    addToast(
+                                      'Invalid image URL',
+                                      'Use a direct https:// or http:// image link.',
+                                      'error'
+                                    );
+                                    return;
+                                  }
+                                  setSavingPhoto(true);
+                                  const res = await updateMemberPhotoUrl(user.id, photoDraftUrl);
+                                  setSavingPhoto(false);
+                                  if (res.ok) {
+                                    setEditingPhotoUserId(null);
+                                    setPhotoDraftUrl('');
+                                  }
+                                }}
+                                className="h-8 px-2.5 rounded-md text-[11px] font-mono font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] disabled:opacity-60"
+                              >
+                                {savingPhoto ? 'Saving...' : 'Save'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingPhotoUserId(null);
+                                  setPhotoDraftUrl('');
+                                }}
+                                className="h-8 px-2 rounded-md text-[11px] font-mono border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td className="py-3.5 px-4">
                       <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
@@ -475,9 +546,30 @@ export const MemberDirectoryPanel: React.FC = () => {
                       </div>
                     </td>
                     <td className="py-3.5 px-4 text-right">
-                      {!isSelf && (
-                        <div className="inline-flex items-center justify-end gap-1.5">
-                          {isConfirmingDelete ? (
+                      <div className="inline-flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (editingPhotoUserId === user.id) {
+                              setEditingPhotoUserId(null);
+                              setPhotoDraftUrl('');
+                            } else {
+                              setEditingPhotoUserId(user.id);
+                              setPhotoDraftUrl(user.photoUrl || '');
+                            }
+                          }}
+                          title="Set or update profile image URL"
+                          aria-label={`Set image URL for ${user.name}`}
+                          className={`p-1.5 rounded border text-slate-500 hover:text-[#009942] dark:hover:text-[#00EA64] hover:border-[#00EA64]/50 ${
+                            editingPhotoUserId === user.id
+                              ? 'border-[#00EA64] text-[#009942] dark:text-[#00EA64]'
+                              : 'border-slate-200 dark:border-slate-700'
+                          }`}
+                        >
+                          <ImageIcon className="w-3.5 h-3.5" />
+                        </button>
+                        {!isSelf &&
+                          (isConfirmingDelete ? (
                             <>
                               <button
                                 type="button"
@@ -506,9 +598,8 @@ export const MemberDirectoryPanel: React.FC = () => {
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
-                          )}
-                        </div>
-                      )}
+                          ))}
+                      </div>
                     </td>
                   </tr>
                 );

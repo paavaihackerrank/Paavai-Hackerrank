@@ -7,11 +7,13 @@ import {
   isInstitutionalEmail,
   isPersonalEmail,
   isValidAccountEmail,
+  isValidOptionalImageUrl,
   isValidPhoneNumber,
   useApp,
 } from '../context/AppContext';
 import { NotificationBanner } from '../components/NotificationBanner';
 import { ForgotPassword } from '../components/ForgotPassword';
+import { PageSeo } from '../components/PageSeo';
 
 export const LoginPage: React.FC = () => {
   const {
@@ -68,6 +70,11 @@ export const LoginPage: React.FC = () => {
 
   return (
     <div className="max-w-lg mx-auto px-4 sm:px-6 py-14 space-y-5">
+      <PageSeo
+        title={resetMode ? 'Account Recovery' : 'Sign In'}
+        description="Sign in to your HackerRank Campus Crew – Paavai Engineering College student account."
+        noIndex
+      />
       {needsEmailVerification && unverifiedEmail ? (
         <NotificationBanner
           user={firebaseUser}
@@ -253,6 +260,7 @@ export const SignUpPage: React.FC = () => {
     year: ACADEMIC_YEARS[0],
     phone: '',
     hackerRankHandle: '',
+    photoUrl: '',
   });
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -304,6 +312,10 @@ export const SignUpPage: React.FC = () => {
       setError('Enter a valid 10-digit unique phone number.');
       return;
     }
+    if (!isValidOptionalImageUrl(form.photoUrl)) {
+      setError('Profile image URL must start with https:// or http:// (max 500 characters).');
+      return;
+    }
     if (form.password.length < 6) {
       setError('Password must be at least 6 characters long.');
       return;
@@ -325,6 +337,7 @@ export const SignUpPage: React.FC = () => {
       year: form.year,
       phone: form.phone,
       hackerRankHandle: form.hackerRankHandle,
+      photoUrl: form.photoUrl,
     });
     setSubmitting(false);
 
@@ -339,6 +352,11 @@ export const SignUpPage: React.FC = () => {
 
   return (
     <div className="max-w-lg mx-auto px-4 sm:px-6 py-14">
+      <PageSeo
+        title="Create Student Member Account"
+        description="Register with HackerRank Campus Crew at Paavai Engineering College for DSA tracks, coding contests, and member dashboard access."
+        noIndex
+      />
       <div className="p-6 sm:p-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] space-y-6">
         <div className="space-y-1.5">
           <p className="font-mono text-xs font-semibold text-[#009942] dark:text-[#00EA64]">
@@ -498,6 +516,23 @@ export const SignUpPage: React.FC = () => {
             </div>
           </div>
 
+          <div>
+            <label htmlFor="su-photo" className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1">
+              Profile Image URL (optional)
+            </label>
+            <input
+              id="su-photo"
+              type="url"
+              value={form.photoUrl}
+              onChange={(e) => setForm({ ...form, photoUrl: e.target.value })}
+              placeholder="https://example.com/your-photo.jpg"
+              className="w-full h-10 px-3 rounded-lg text-sm font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+            />
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+              Direct <span className="font-mono">https://</span> image link shown on your profile &amp; Team page
+            </p>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div>
               <label htmlFor="su-pw" className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1">
@@ -562,7 +597,9 @@ export const SignUpPage: React.FC = () => {
             disabled={submitting}
             className="w-full py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60"
           >
-            {submitting ? 'Creating Account...' : 'Sign Up with Personal Email'}
+            {submitting
+              ? 'Creating Account & Sending Verification...'
+              : 'Sign Up with Personal Email'}
           </button>
         </form>
 

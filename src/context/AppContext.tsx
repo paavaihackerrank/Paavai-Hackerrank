@@ -87,6 +87,7 @@ interface SignupPayload {
   year: string;
   phone: string;
   hackerRankHandle: string;
+  photoUrl?: string;
 }
 
 interface PendingSignupMeta {
@@ -97,6 +98,7 @@ interface PendingSignupMeta {
   year: string;
   phone: string;
   hackerRankHandle: string;
+  photoUrl?: string;
 }
 
 export interface AuthActionResult {
@@ -105,6 +107,14 @@ export interface AuthActionResult {
   needsVerification?: boolean;
   role?: Exclude<UserRole, 'outsider'>;
   redirectPath?: string;
+}
+
+export interface VerificationDispatchState {
+  status: 'idle' | 'sending' | 'sent' | 'failed';
+  email: string;
+  dispatchedAt?: string;
+  error?: string;
+  fallbackWarning?: string;
 }
 
 interface AppContextValue {
@@ -117,6 +127,7 @@ interface AppContextValue {
   firebaseUser: FirebaseUser | null;
   needsEmailVerification: boolean;
   unverifiedEmail: string | null;
+  verificationDispatchState: VerificationDispatchState;
   currentUser: UserAccount | null;
   currentRole: UserRole;
   can: (permission: PermissionKey) => boolean;
@@ -226,6 +237,10 @@ interface AppContextValue {
 
   // Actions — Users, Join Requests & Settings
   updateUserRole: (userId: string, newRole: Exclude<UserRole, 'outsider'>) => Promise<void>;
+  updateMemberPhotoUrl: (
+    userId: string,
+    photoUrl: string
+  ) => Promise<{ ok: boolean; error?: string }>;
   deleteUser: (userId: string) => Promise<void>;
   submitJoinRequest: (
     req: Omit<JoinRequest, 'id' | 'submittedAt' | 'status'>
@@ -241,6 +256,7 @@ interface AppContextValue {
         | 'department'
         | 'year'
         | 'phone'
+        | 'photoUrl'
         | 'hackerRankHandle'
         | 'hackerRankUrl'
         | 'githubUrl'
@@ -269,6 +285,34 @@ const ensureMinLen = (val: string, fallback: string, minLen: number, maxLen: num
 const sanitizeId = (raw: string) =>
   raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128) || `id_${Date.now()}`;
 
+export function isValidOptionalImageUrl(raw?: string | null): boolean {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return true;
+  if (trimmed.length > 500) return false;
+  if (trimmed.startsWith('/src/')) return true;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+export function sanitizeImageUrl(raw?: string | null): string {
+  const trimmed = (raw || '').trim();
+  if (!trimmed || trimmed.length > 500) return '';
+  if (trimmed.startsWith('/src/')) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      return trimmed;
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
 const RESEND_COOLDOWN_MS = 60_000;
 
 export function getResendCooldownStorageKey(email?: string | null): string {
@@ -289,14 +333,15 @@ interface EmailDispatchOutcome {
   fallbackMessage?: string;
 }
 
+const unauthorizedContinueOrigins = new Set<string>();
+
 async function sendVerificationWithRedirect(user: FirebaseUser): Promise<EmailDispatchOutcome> {
   auth.useDeviceLanguage();
-  const continueUrl =
-    typeof window !== 'undefined' && window.location?.origin
-      ? `${window.location.origin}/verified?verified=true`
-      : '';
+  const origin =
+    typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '';
+  const continueUrl = origin ? `${origin}/verified?verified=true` : '';
 
-  if (continueUrl) {
+  if (continueUrl && !unauthorizedContinueOrigins.has(origin)) {
     const actionCodeSettings: ActionCodeSettings = {
       url: continueUrl,
       handleCodeInApp: false,
@@ -311,6 +356,7 @@ async function sendVerificationWithRedirect(user: FirebaseUser): Promise<EmailDi
         code === 'auth/invalid-continue-uri' ||
         code === 'auth/missing-continue-uri'
       ) {
+        if (origin) unauthorizedContinueOrigins.add(origin);
         await sendEmailVerification(user);
         return {
           continueUrl,
@@ -323,7 +369,16 @@ async function sendVerificationWithRedirect(user: FirebaseUser): Promise<EmailDi
     }
   }
   await sendEmailVerification(user);
-  return { continueUrl: 'default' };
+  return {
+    continueUrl: continueUrl || 'default',
+    ...(origin && unauthorizedContinueOrigins.has(origin)
+      ? {
+          fallbackCode: 'cached_fallback_without_continue_url',
+          fallbackMessage:
+            'Sent using default Firebase verification redirect for this preview origin.',
+        }
+      : {}),
+  };
 }
 
 async function logEmailSendAttempt(entry: {
@@ -498,6 +553,7 @@ function buildTeamMemberPayload(input: {
   department: string;
   year: string;
   bio: string;
+  photoUrl?: string;
   hackerRankHandle: string;
 }) {
   return {
@@ -508,6 +564,7 @@ function buildTeamMemberPayload(input: {
     department: ensureMinLen(input.department, 'CSE', 2, 40),
     year: ensureMinLen(input.year, '1st Year', 2, 20),
     bio: clampStr(input.bio || '', 500),
+    photoUrl: sanitizeImageUrl(input.photoUrl),
     hackerRankHandle: clampStr(input.hackerRankHandle || '', 60),
     updatedAt: new Date().toISOString(),
   };
@@ -527,6 +584,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [authReady, setAuthReady] = useState(false);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [firebaseProfile, setFirebaseProfile] = useState<UserAccount | null>(null);
+  const [verificationDispatchState, setVerificationDispatchState] =
+    useState<VerificationDispatchState>({
+      status: 'idle',
+      email: '',
+    });
 
   // Live Firestore collections (zero demo/mock fallback data)
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(INITIAL_SITE_SETTINGS);
@@ -618,6 +680,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 department: String(data.department || 'CSE'),
                 year: String(data.year || '1st Year'),
                 bio: String(data.bio || ''),
+                photoUrl: sanitizeImageUrl(String(data.photoUrl || '')),
                 hackerRankHandle: String(data.hackerRankHandle || ''),
               })
             );
@@ -687,6 +750,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           role: assignedRole,
           emailVerified: true,
           phone: clampStr(pending?.phone || '', 20),
+          photoUrl: sanitizeImageUrl(pending?.photoUrl || fbUser.photoURL || ''),
           hackerRankHandle: clampStr(
             pending?.hackerRankHandle ||
               `@${(fbUser.email || 'coder').split('@')[0].slice(0, 20)}`,
@@ -712,6 +776,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               department: newProfileDoc.department,
               year: newProfileDoc.year,
               bio: newProfileDoc.bio,
+              photoUrl: newProfileDoc.photoUrl,
               hackerRankHandle: newProfileDoc.hackerRankHandle,
             })
           );
@@ -784,6 +849,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             department: String(data.department || 'CSE'),
             year: String(data.year || '1st Year'),
             phone: String(data.phone || ''),
+            photoUrl: sanitizeImageUrl(String(data.photoUrl || '')),
             hackerRankHandle: String(data.hackerRankHandle || '@paavai_coder'),
             hackerRankUrl: data.hackerRankUrl ? String(data.hackerRankUrl) : '',
             githubUrl: data.githubUrl ? String(data.githubUrl) : '',
@@ -914,6 +980,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               department: String(x.department || ''),
               year: String(x.year || ''),
               bio: String(x.bio || ''),
+              photoUrl: sanitizeImageUrl(String(x.photoUrl || '')),
               hackerRankHandle: String(x.hackerRankHandle || ''),
               updatedAt: x.updatedAt ? String(x.updatedAt) : undefined,
             };
@@ -1065,6 +1132,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               department: String(x.department || ''),
               year: String(x.year || ''),
               bio: String(x.bio || ''),
+              photoUrl: sanitizeImageUrl(String(x.photoUrl || '')),
               skills: Array.isArray(x.skills) ? x.skills.map(String) : [],
               hackerRankHandle: String(x.hackerRankHandle || ''),
               hackerRankUrl: x.hackerRankUrl ? String(x.hackerRankUrl) : '',
@@ -1230,6 +1298,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               department: String(x.department || ''),
               year: String(x.year || ''),
               phone: String(x.phone || ''),
+              photoUrl: sanitizeImageUrl(String(x.photoUrl || '')),
               hackerRankHandle: String(x.hackerRankHandle || ''),
               hackerRankUrl: x.hackerRankUrl ? String(x.hackerRankUrl) : '',
               githubUrl: x.githubUrl ? String(x.githubUrl) : '',
@@ -1349,6 +1418,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             department: string;
             year: string;
             bio: string;
+            photoUrl: string;
             hackerRankHandle: string;
           }
         >();
@@ -1396,6 +1466,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               department: String(x.department || 'CSE'),
               year: String(x.year || '1st Year'),
               bio: String(x.bio || ''),
+              photoUrl: sanitizeImageUrl(String(x.photoUrl || '')),
               hackerRankHandle: String(x.hackerRankHandle || ''),
             });
           }
@@ -1478,6 +1549,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             existingData?.department !== ensureMinLen(member.department, 'CSE', 2, 40) ||
             existingData?.year !== ensureMinLen(member.year, '1st Year', 2, 20) ||
             existingData?.bio !== clampStr(member.bio || '', 500) ||
+            String(existingData?.photoUrl || '') !== sanitizeImageUrl(member.photoUrl) ||
             existingData?.hackerRankHandle !== clampStr(member.hackerRankHandle || '', 60);
 
           if (needsSync) {
@@ -1552,6 +1624,98 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [authReady, firebaseUser, isRealCampusLead]);
 
+  // Keep public /team_members collection synced automatically whenever Lead or Crew profile data changes
+  useEffect(() => {
+    if (!authReady || !firebaseUser || !isVerifiedAllowedUser || !firebaseProfile) return;
+    if (firebaseProfile.role !== 'lead' && firebaseProfile.role !== 'crew') return;
+
+    const existing = teamMembers.find((tm) => tm.uid === firebaseProfile.id);
+    const desiredName = ensureMinLen(firebaseProfile.name, 'Paavai Coder', 2, 100);
+    const desiredDept = ensureMinLen(firebaseProfile.department, 'CSE', 2, 40);
+    const desiredYear = ensureMinLen(firebaseProfile.year, '1st Year', 2, 20);
+    const desiredBio = clampStr(firebaseProfile.bio || '', 500);
+    const desiredPhoto = sanitizeImageUrl(firebaseProfile.photoUrl);
+    const desiredHandle = clampStr(firebaseProfile.hackerRankHandle || '', 60);
+
+    const outOfSync =
+      !existing ||
+      existing.name !== desiredName ||
+      existing.role !== firebaseProfile.role ||
+      existing.department !== desiredDept ||
+      existing.year !== desiredYear ||
+      existing.bio !== desiredBio ||
+      (existing.photoUrl || '') !== desiredPhoto ||
+      existing.hackerRankHandle !== desiredHandle;
+
+    if (outOfSync) {
+      void setDoc(
+        doc(db, 'team_members', firebaseProfile.id),
+        buildTeamMemberPayload({
+          uid: firebaseProfile.id,
+          name: desiredName,
+          role: firebaseProfile.role,
+          department: desiredDept,
+          year: desiredYear,
+          bio: desiredBio,
+          photoUrl: desiredPhoto,
+          hackerRankHandle: desiredHandle,
+        })
+      ).catch(() => {});
+    }
+  }, [authReady, firebaseUser, isVerifiedAllowedUser, firebaseProfile, teamMembers]);
+
+  // Lead continuous roster reconciliation: ensures promoted Crew & Lead always exist in public /team_members
+  useEffect(() => {
+    if (!authReady || !firebaseUser || !isRealCampusLead || liveUsers.length === 0) return;
+
+    const expectedTeam = liveUsers.filter(
+      (u) =>
+        (u.role === 'lead' || u.role === 'crew') &&
+        !LEGACY_DEMO_USER_IDS.has(u.id) &&
+        !LEGACY_DEMO_EMAILS.has((u.email || '').toLowerCase())
+    );
+    const existingByUid = new Map(teamMembers.map((tm) => [tm.uid, tm]));
+    const expectedUids = new Set(expectedTeam.map((u) => u.id));
+
+    const toUpsert = expectedTeam.filter((u) => {
+      const existing = existingByUid.get(u.id);
+      if (!existing) return true;
+      return (
+        existing.name !== ensureMinLen(u.name, 'Paavai Coder', 2, 100) ||
+        existing.role !== u.role ||
+        existing.department !== ensureMinLen(u.department, 'CSE', 2, 40) ||
+        existing.year !== ensureMinLen(u.year, '1st Year', 2, 20) ||
+        existing.bio !== clampStr(u.bio || '', 500) ||
+        (existing.photoUrl || '') !== sanitizeImageUrl(u.photoUrl) ||
+        existing.hackerRankHandle !== clampStr(u.hackerRankHandle || '', 60)
+      );
+    });
+
+    const toDelete = teamMembers.filter((tm) => !expectedUids.has(tm.uid));
+    if (toUpsert.length === 0 && toDelete.length === 0) return;
+
+    const batch = writeBatch(db);
+    toUpsert.forEach((u) => {
+      batch.set(
+        doc(db, 'team_members', u.id),
+        buildTeamMemberPayload({
+          uid: u.id,
+          name: u.name,
+          role: u.role as 'lead' | 'crew',
+          department: u.department,
+          year: u.year,
+          bio: u.bio,
+          photoUrl: u.photoUrl,
+          hackerRankHandle: u.hackerRankHandle,
+        })
+      );
+    });
+    toDelete.forEach((tm) => {
+      batch.delete(doc(db, 'team_members', tm.id));
+    });
+    void batch.commit().catch(() => {});
+  }, [authReady, firebaseUser, isRealCampusLead, liveUsers, teamMembers]);
+
   // ---------------- ACTIVE USER & ROLE RESOLUTION ----------------
   const currentUser = useMemo<UserAccount | null>(() => {
     return isVerifiedAllowedUser ? firebaseProfile : null;
@@ -1572,6 +1736,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const users = isRealCampusLead ? liveUsers : [];
+
+  const resolvedTeamMembers = useMemo<TeamMember[]>(() => {
+    if (!isRealCampusLead || liveUsers.length === 0) {
+      return teamMembers;
+    }
+    const existingByUid = new Map(teamMembers.map((tm) => [tm.uid, tm]));
+    return liveUsers
+      .filter(
+        (u) =>
+          (u.role === 'lead' || u.role === 'crew') &&
+          !LEGACY_DEMO_USER_IDS.has(u.id) &&
+          !LEGACY_DEMO_EMAILS.has((u.email || '').toLowerCase())
+      )
+      .map((u) => {
+        const tm = existingByUid.get(u.id);
+        return {
+          id: u.id,
+          uid: u.id,
+          name: ensureMinLen(u.name, tm?.name || 'Paavai Coder', 2, 100),
+          role: u.role as 'lead' | 'crew',
+          designation:
+            u.role === 'lead' ? 'HackerRank Campus Lead' : 'Campus Crew Member',
+          department: ensureMinLen(u.department, tm?.department || 'CSE', 2, 40),
+          year: ensureMinLen(u.year, tm?.year || '1st Year', 2, 20),
+          bio: clampStr(u.bio || tm?.bio || '', 500),
+          photoUrl: sanitizeImageUrl(u.photoUrl || tm?.photoUrl || ''),
+          hackerRankHandle: clampStr(
+            u.hackerRankHandle || tm?.hackerRankHandle || '',
+            60
+          ),
+          updatedAt: tm?.updatedAt,
+        };
+      });
+  }, [isRealCampusLead, liveUsers, teamMembers]);
 
   // ---------------- FIREBASE AUTH ACTIONS ----------------
   const login = async (email: string, password: string): Promise<AuthActionResult> => {
@@ -1652,6 +1850,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         error: 'Enter a valid 10-digit phone number.',
       };
     }
+    if (!isValidOptionalImageUrl(payload.photoUrl)) {
+      return {
+        ok: false,
+        error: 'Profile image URL must start with https:// or http:// (max 500 characters).',
+      };
+    }
 
     try {
       const [emailLockId, phoneLockId, collegeEmailLockId] = await Promise.all([
@@ -1681,39 +1885,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       const cred = await createUserWithEmailAndPassword(auth, trimmedEmail, payload.password);
-      await updateProfile(cred.user, { displayName: clampStr(payload.name, 100) });
+      setVerificationDispatchState({
+        status: 'sending',
+        email: trimmedEmail,
+      });
 
       const nowISO = new Date().toISOString();
       let emailClaimed = false;
       let phoneClaimed = false;
       let collegeEmailClaimed = false;
 
-      try {
-        await setDoc(doc(db, 'unique_emails', emailLockId), {
+      // Claim all 3 uniqueness locks in parallel so verification email dispatches without delay
+      const [emailLockRes, phoneLockRes, collegeLockRes] = await Promise.allSettled([
+        setDoc(doc(db, 'unique_emails', emailLockId), {
           uid: cred.user.uid,
           createdAt: nowISO,
-        });
-        emailClaimed = true;
-        await setDoc(doc(db, 'unique_phones', phoneLockId), {
+        }),
+        setDoc(doc(db, 'unique_phones', phoneLockId), {
           uid: cred.user.uid,
           createdAt: nowISO,
-        });
-        phoneClaimed = true;
-        await setDoc(doc(db, 'unique_college_emails', collegeEmailLockId), {
+        }),
+        setDoc(doc(db, 'unique_college_emails', collegeEmailLockId), {
           uid: cred.user.uid,
           createdAt: nowISO,
-        });
-        collegeEmailClaimed = true;
-      } catch {
-        if (emailClaimed) {
-          await deleteDoc(doc(db, 'unique_emails', emailLockId)).catch(() => {});
-        }
-        if (phoneClaimed) {
-          await deleteDoc(doc(db, 'unique_phones', phoneLockId)).catch(() => {});
-        }
-        if (collegeEmailClaimed) {
-          await deleteDoc(doc(db, 'unique_college_emails', collegeEmailLockId)).catch(() => {});
-        }
+        }),
+      ]);
+
+      emailClaimed = emailLockRes.status === 'fulfilled';
+      phoneClaimed = phoneLockRes.status === 'fulfilled';
+      collegeEmailClaimed = collegeLockRes.status === 'fulfilled';
+
+      if (!emailClaimed || !phoneClaimed || !collegeEmailClaimed) {
+        setVerificationDispatchState({ status: 'idle', email: '' });
+        await Promise.all([
+          emailClaimed
+            ? deleteDoc(doc(db, 'unique_emails', emailLockId)).catch(() => {})
+            : Promise.resolve(),
+          phoneClaimed
+            ? deleteDoc(doc(db, 'unique_phones', phoneLockId)).catch(() => {})
+            : Promise.resolve(),
+          collegeEmailClaimed
+            ? deleteDoc(doc(db, 'unique_college_emails', collegeEmailLockId)).catch(() => {})
+            : Promise.resolve(),
+        ]);
         await cred.user.delete().catch(() => {});
         const duplicateField = !emailClaimed
           ? 'email address'
@@ -1725,46 +1939,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { ok: false, error: dupMsg };
       }
 
-      let emailSent = false;
-      let emailErrorMsg = '';
-      try {
-        const dispatchOutcome = await sendVerificationWithRedirect(cred.user);
-        emailSent = true;
-        void logEmailSendAttempt({
-          type: 'verification',
-          email: trimmedEmail,
-          status: 'sent',
-          errorCode: dispatchOutcome.fallbackCode,
-          errorMessage: dispatchOutcome.fallbackMessage,
-          continueUrl: dispatchOutcome.continueUrl,
-          actorUid: cred.user.uid,
-        });
-      } catch (mailErr: unknown) {
-        console.error('Failed to send initial verification email:', mailErr);
-        const mailCode = (mailErr as { code?: string })?.code || 'unknown';
-        if (mailCode === 'auth/too-many-requests') {
-          setResendCooldownTimestamp(trimmedEmail);
-        }
-        emailErrorMsg =
-          mailCode === 'auth/too-many-requests'
-            ? 'Too many verification requests. Please wait a few minutes and try again.'
-            : mailErr instanceof Error
-              ? mailErr.message
-              : 'Could not send verification email.';
-        void logEmailSendAttempt({
-          type: 'verification',
-          email: trimmedEmail,
-          status: 'failed',
-          errorCode: mailCode,
-          errorMessage: emailErrorMsg,
-          continueUrl:
-            typeof window !== 'undefined' && window.location?.origin
-              ? `${window.location.origin}/verified?verified=true`
-              : 'default',
-          actorUid: cred.user.uid,
-        });
-      }
-
       const pendingMeta: PendingSignupMeta = {
         name: ensureMinLen(payload.name, 'Paavai Student', 2, 100),
         collegeEmail: clampStr(trimmedCollegeEmail, 160),
@@ -1772,6 +1946,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         department: ensureMinLen(payload.department, 'CSE', 2, 40),
         year: ensureMinLen(payload.year, '1st Year', 2, 20),
         phone: clampStr(normalizedPhone, 20),
+        photoUrl: sanitizeImageUrl(payload.photoUrl),
         hackerRankHandle: clampStr(
           payload.hackerRankHandle || `@${trimmedEmail.split('@')[0].slice(0, 20)}`,
           60
@@ -1780,9 +1955,68 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       savePendingMeta(cred.user.uid, pendingMeta);
 
-      // Persist unverified user record in Firestore so scheduled cleanup can purge unverified accounts after 12h
-      try {
-        await setDoc(doc(db, 'users', cred.user.uid), {
+      // Dispatch verification email immediately alongside Auth profile update and unverified user persistence
+      const verifyPromise = (async () => {
+        try {
+          const dispatchOutcome = await sendVerificationWithRedirect(cred.user);
+          const dispatchedAt = new Date().toLocaleTimeString('en-IN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          });
+          setResendCooldownTimestamp(trimmedEmail);
+          setVerificationDispatchState({
+            status: 'sent',
+            email: trimmedEmail,
+            dispatchedAt,
+            fallbackWarning: dispatchOutcome.fallbackMessage,
+          });
+          void logEmailSendAttempt({
+            type: 'verification',
+            email: trimmedEmail,
+            status: 'sent',
+            errorCode: dispatchOutcome.fallbackCode,
+            errorMessage: dispatchOutcome.fallbackMessage,
+            continueUrl: dispatchOutcome.continueUrl,
+            actorUid: cred.user.uid,
+          });
+          return { sent: true as const, errorMsg: '' };
+        } catch (mailErr: unknown) {
+          console.error('Failed to send initial verification email:', mailErr);
+          const mailCode = (mailErr as { code?: string })?.code || 'unknown';
+          if (mailCode === 'auth/too-many-requests') {
+            setResendCooldownTimestamp(trimmedEmail);
+          }
+          const emailErrorMsg =
+            mailCode === 'auth/too-many-requests'
+              ? 'Too many verification requests. Please wait a few minutes and try again.'
+              : mailErr instanceof Error
+                ? mailErr.message
+                : 'Could not send verification email.';
+          setVerificationDispatchState({
+            status: 'failed',
+            email: trimmedEmail,
+            error: emailErrorMsg,
+          });
+          void logEmailSendAttempt({
+            type: 'verification',
+            email: trimmedEmail,
+            status: 'failed',
+            errorCode: mailCode,
+            errorMessage: emailErrorMsg,
+            continueUrl:
+              typeof window !== 'undefined' && window.location?.origin
+                ? `${window.location.origin}/verified?verified=true`
+                : 'default',
+            actorUid: cred.user.uid,
+          });
+          return { sent: false as const, errorMsg: emailErrorMsg };
+        }
+      })();
+
+      const profileSavePromise = Promise.all([
+        updateProfile(cred.user, { displayName: clampStr(payload.name, 100) }).catch(() => {}),
+        setDoc(doc(db, 'users', cred.user.uid), {
           uid: cred.user.uid,
           email: clampStr(trimmedEmail, 160),
           collegeEmail: pendingMeta.collegeEmail,
@@ -1793,20 +2027,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           role: 'member',
           emailVerified: false,
           phone: pendingMeta.phone,
+          photoUrl: pendingMeta.photoUrl || '',
           hackerRankHandle: pendingMeta.hackerRankHandle,
           bio: 'Student Community Member at Paavai Engineering College.',
           skills: ['Problem Solving'],
           joinedAt: nowISO.slice(0, 10),
           createdAt: nowISO,
           updatedAt: nowISO,
-        });
-      } catch (writeErr) {
-        console.warn('Could not persist unverified user record:', writeErr);
-      }
+        }).catch((writeErr) => {
+          console.warn('Could not persist unverified user record:', writeErr);
+        }),
+      ]);
+
+      const [emailResult] = await Promise.all([verifyPromise, profileSavePromise]);
 
       setFirebaseUser(cred.user);
 
-      if (emailSent) {
+      if (emailResult.sent) {
         addToast(
           'Verification email sent',
           `Check ${trimmedEmail} (including Spam/Promotions) for your verification link to activate your account within 12 hours.`,
@@ -1815,12 +2052,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else {
         addToast(
           'Failed to send verification email',
-          `${emailErrorMsg} Click "Resend Verification Email" to send it again.`,
+          `${emailResult.errorMsg} Click "Resend Verification Email" to send it again.`,
           'error'
         );
       }
       return { ok: true, needsVerification: true };
     } catch (err: unknown) {
+      setVerificationDispatchState({ status: 'idle', email: '' });
       const code = (err as { code?: string })?.code || '';
       if (code === 'auth/operation-not-allowed') {
         return {
@@ -1953,9 +2191,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       second: '2-digit',
     });
 
+    setVerificationDispatchState({
+      status: 'sending',
+      email: targetEmail,
+    });
+
     try {
       const dispatchOutcome = await sendVerificationWithRedirect(auth.currentUser);
       setResendCooldownTimestamp(auth.currentUser.email);
+      setVerificationDispatchState({
+        status: 'sent',
+        email: targetEmail,
+        dispatchedAt,
+        fallbackWarning: dispatchOutcome.fallbackMessage,
+      });
       if (targetEmail && isValidAccountEmail(targetEmail)) {
         await logEmailSendAttempt({
           type: 'verification',
@@ -1988,6 +2237,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         : err instanceof Error
           ? err.message
           : 'Could not resend verification email.';
+      setVerificationDispatchState({
+        status: 'failed',
+        email: targetEmail,
+        error: errMsg,
+      });
       if (targetEmail && isValidAccountEmail(targetEmail)) {
         await logEmailSendAttempt({
           type: 'verification',
@@ -2141,6 +2395,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const logout = async () => {
+    setVerificationDispatchState({ status: 'idle', email: '' });
     if (firebaseUser) {
       await signOut(auth);
     }
@@ -2907,6 +3162,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               department: targetUser.department,
               year: targetUser.year,
               bio: targetUser.bio,
+              photoUrl: targetUser.photoUrl || '',
               hackerRankHandle: targetUser.hackerRankHandle,
             }
           : {
@@ -2914,6 +3170,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               department: String(userSnap?.data()?.department || 'CSE'),
               year: String(userSnap?.data()?.year || '1st Year'),
               bio: String(userSnap?.data()?.bio || ''),
+              photoUrl: String(userSnap?.data()?.photoUrl || ''),
               hackerRankHandle: String(userSnap?.data()?.hackerRankHandle || ''),
             };
 
@@ -2926,6 +3183,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             department: src.department,
             year: src.year,
             bio: src.bio,
+            photoUrl: src.photoUrl,
             hackerRankHandle: src.hackerRankHandle,
           })
         );
@@ -2940,6 +3198,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, path);
+    }
+  };
+
+  const updateMemberPhotoUrl = async (
+    userId: string,
+    photoUrl: string
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (!can('canManageUsers') || !firebaseUser) {
+      return { ok: false, error: 'Only the Campus Lead can update member photo URLs.' };
+    }
+    if (!isValidOptionalImageUrl(photoUrl)) {
+      const msg = 'Image URL must start with https:// or http:// (max 500 characters).';
+      addToast('Invalid image URL', msg, 'error');
+      return { ok: false, error: msg };
+    }
+    const cleanUrl = sanitizeImageUrl(photoUrl);
+    const nowISO = new Date().toISOString();
+    const path = `users/${userId}`;
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        photoUrl: cleanUrl,
+        updatedAt: nowISO,
+      });
+
+      const targetUser = users.find((u) => u.id === userId);
+      const userSnap = targetUser ? null : await getDoc(doc(db, 'users', userId));
+      const role = (targetUser?.role || userSnap?.data()?.role) as Exclude<UserRole, 'outsider'>;
+      const targetName = targetUser?.name || String(userSnap?.data()?.name || 'Member');
+
+      if (role === 'lead' || role === 'crew') {
+        await setDoc(
+          doc(db, 'team_members', userId),
+          buildTeamMemberPayload({
+            uid: userId,
+            name: targetName,
+            role,
+            department: targetUser?.department || String(userSnap?.data()?.department || 'CSE'),
+            year: targetUser?.year || String(userSnap?.data()?.year || '1st Year'),
+            bio: targetUser?.bio || String(userSnap?.data()?.bio || ''),
+            photoUrl: cleanUrl,
+            hackerRankHandle:
+              targetUser?.hackerRankHandle || String(userSnap?.data()?.hackerRankHandle || ''),
+          })
+        );
+      }
+
+      addToast(
+        cleanUrl ? 'Profile photo updated' : 'Profile photo cleared',
+        `${targetName}'s photo is synced in Firestore.`,
+        'success'
+      );
+      return { ok: true };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+      return { ok: false, error: 'Failed to update member photo URL.' };
     }
   };
 
@@ -3132,6 +3445,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updates.linkedinUrl !== undefined
         ? clampStr(updates.linkedinUrl, 300)
         : currentUser.linkedinUrl || '';
+    if (updates.photoUrl !== undefined && !isValidOptionalImageUrl(updates.photoUrl)) {
+      addToast(
+        'Invalid image URL',
+        'Profile image URL must start with https:// or http:// (max 500 characters).',
+        'error'
+      );
+      return;
+    }
+    const nextPhotoUrl =
+      updates.photoUrl !== undefined
+        ? sanitizeImageUrl(updates.photoUrl)
+        : sanitizeImageUrl(currentUser.photoUrl);
     const nextBio =
       updates.bio !== undefined ? clampStr(updates.bio, 500) : currentUser.bio;
     const nextSkills =
@@ -3201,7 +3526,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : {}),
         ...(updates.department !== undefined ? { department: nextDepartment } : {}),
         ...(updates.year !== undefined ? { year: nextYear } : {}),
-        ...(nextPhoneStr !== undefined ? { phone: nextPhoneStr } : {}),
+        ...(updates.phone !== undefined ? { phone: nextPhoneStr } : {}),
+        ...(updates.photoUrl !== undefined ? { photoUrl: nextPhotoUrl } : {}),
         ...(updates.hackerRankHandle !== undefined ? { hackerRankHandle: nextHandle } : {}),
         ...(updates.hackerRankUrl !== undefined ? { hackerRankUrl: nextHackerRankUrl } : {}),
         ...(updates.githubUrl !== undefined ? { githubUrl: nextGithubUrl } : {}),
@@ -3228,6 +3554,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         department: nextDepartment,
         year: nextYear,
         bio: nextBio,
+        photoUrl: nextPhotoUrl,
         skills: nextSkills,
         hackerRankHandle: nextHandle,
         hackerRankUrl: nextHackerRankUrl,
@@ -3248,6 +3575,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             department: nextDepartment,
             year: nextYear,
             bio: nextBio,
+            photoUrl: nextPhotoUrl,
             hackerRankHandle: nextHandle,
           })
         );
@@ -3268,6 +3596,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         firebaseUser,
         needsEmailVerification,
         unverifiedEmail,
+        verificationDispatchState,
         currentUser,
         currentRole,
         can,
@@ -3284,7 +3613,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         siteSettings,
         users,
         publicProfiles,
-        teamMembers,
+        teamMembers: resolvedTeamMembers,
         events,
         announcements,
         leaderboard,
@@ -3327,6 +3656,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         logCodingActivity,
         deleteCodingActivity,
         updateUserRole,
+        updateMemberPhotoUrl,
         deleteUser,
         submitJoinRequest,
         reviewJoinRequest,

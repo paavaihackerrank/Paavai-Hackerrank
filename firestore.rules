@@ -84,12 +84,16 @@ service cloud.firestore {
       return val is string && val.size() >= 8 && val.size() <= 40;
     }
 
+    function isValidOptionalPhotoUrl(val) {
+      return val is string && val.size() <= 500 && (val == '' || val.matches('^https?://.+') || val.matches('^/src/.+'));
+    }
+
     // ------------------------------------------------------------------------
     // ENTITY VALIDATION BLUEPRINTS
     // ------------------------------------------------------------------------
     function isValidUserProfile(data) {
       return data.keys().hasAll(['uid', 'email', 'name', 'regNo', 'department', 'year', 'role'])
-        && data.keys().hasOnly(['uid', 'email', 'collegeEmail', 'name', 'regNo', 'department', 'year', 'role', 'emailVerified', 'phone', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'joinedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'collegeEmail', 'name', 'regNo', 'department', 'year', 'role', 'emailVerified', 'phone', 'photoUrl', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'joinedAt', 'createdAt', 'updatedAt'])
         && isValidId(data.uid)
         && isValidEmail(data.email)
         && (!('collegeEmail' in data) || data.collegeEmail == '' || isValidEmail(data.collegeEmail))
@@ -100,6 +104,7 @@ service cloud.firestore {
         && data.role in ['lead', 'crew', 'member']
         && (!('emailVerified' in data) || data.emailVerified is bool)
         && (!('phone' in data) || (data.phone is string && data.phone.size() <= 20))
+        && (!('photoUrl' in data) || isValidOptionalPhotoUrl(data.photoUrl))
         && (!('hackerRankHandle' in data) || (data.hackerRankHandle is string && data.hackerRankHandle.size() <= 60))
         && (!('hackerRankUrl' in data) || (data.hackerRankUrl is string && data.hackerRankUrl.size() <= 300))
         && (!('githubUrl' in data) || (data.githubUrl is string && data.githubUrl.size() <= 300))
@@ -220,7 +225,7 @@ service cloud.firestore {
 
     function isValidTeamMemberPublic(data) {
       return data.keys().hasAll(['uid', 'name', 'role', 'designation', 'department', 'year'])
-        && data.keys().hasOnly(['uid', 'name', 'role', 'designation', 'department', 'year', 'bio', 'hackerRankHandle', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'name', 'role', 'designation', 'department', 'year', 'bio', 'photoUrl', 'hackerRankHandle', 'updatedAt'])
         && isValidId(data.uid)
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 100
         && data.role in ['lead', 'crew']
@@ -228,18 +233,20 @@ service cloud.firestore {
         && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
         && data.year is string && data.year.size() >= 2 && data.year.size() <= 20
         && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && (!('photoUrl' in data) || isValidOptionalPhotoUrl(data.photoUrl))
         && (!('hackerRankHandle' in data) || (data.hackerRankHandle is string && data.hackerRankHandle.size() <= 60))
         && (!('updatedAt' in data) || isValidTimestampStr(data.updatedAt));
     }
 
     function isValidPublicProfile(data) {
       return data.keys().hasAll(['uid', 'name', 'department', 'year'])
-        && data.keys().hasOnly(['uid', 'name', 'department', 'year', 'bio', 'skills', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'completedDsaCount', 'completedRoadmapCount', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'name', 'department', 'year', 'bio', 'photoUrl', 'skills', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'completedDsaCount', 'completedRoadmapCount', 'updatedAt'])
         && isValidId(data.uid)
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 100
         && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
         && data.year is string && data.year.size() >= 2 && data.year.size() <= 20
         && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && (!('photoUrl' in data) || isValidOptionalPhotoUrl(data.photoUrl))
         && (!('skills' in data) || (data.skills is list && data.skills.size() <= 12 && (data.skills.size() == 0 || data.skills[0] is string)))
         && (!('hackerRankHandle' in data) || (data.hackerRankHandle is string && data.hackerRankHandle.size() <= 60))
         && (!('hackerRankUrl' in data) || (data.hackerRankUrl is string && data.hackerRankUrl.size() <= 300))
@@ -367,7 +374,7 @@ service cloud.firestore {
           incoming().uid == existing().uid &&
           incoming().email == existing().email &&
           (request.auth.uid != userId || incoming().role == existing().role) &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'name', 'collegeEmail', 'regNo', 'department', 'year', 'phone', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'updatedAt'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'name', 'collegeEmail', 'regNo', 'department', 'year', 'phone', 'photoUrl', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'updatedAt'])
         ) ||
         (
           isOwner(userId) &&
@@ -375,7 +382,7 @@ service cloud.firestore {
           incoming().email == existing().email &&
           incoming().role == existing().role &&
           (!('emailVerified' in incoming()) || incoming().emailVerified == true) &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'regNo', 'department', 'year', 'phone', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'emailVerified', 'updatedAt'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'regNo', 'department', 'year', 'phone', 'photoUrl', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'emailVerified', 'updatedAt'])
         )
       );
 

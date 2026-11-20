@@ -191,7 +191,7 @@ export const UpcomingEventsTicker: React.FC = () => {
               ·
             </span>
             <Link
-              to="/events"
+              to={`/events/${encodeURIComponent(activeEvent.id)}`}
               className="font-mono font-semibold text-slate-900 dark:text-white hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors truncate max-w-[240px] sm:max-w-[340px] md:max-w-md"
               title={activeEvent.title}
             >
@@ -261,7 +261,7 @@ export const UpcomingEventsTicker: React.FC = () => {
           )}
 
           <Link
-            to="/events"
+            to={`/events/${encodeURIComponent(activeEvent.id)}`}
             className="font-mono text-xs text-[#009942] dark:text-[#00EA64] hover:underline whitespace-nowrap shrink-0"
           >
             Register →

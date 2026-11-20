@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle2 } from 'lucide-react';
-import { ACADEMIC_YEARS, DEPARTMENTS } from '../config/rbacAndData';
+import { ACADEMIC_YEARS, CHAPTER_IMAGES, DEPARTMENTS } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
+import { PageSeo } from '../components/PageSeo';
 
 export const JoinUsPage: React.FC = () => {
   const { submitJoinRequest, siteSettings, currentUser } = useApp();
@@ -56,6 +57,11 @@ export const JoinUsPage: React.FC = () => {
   if (!siteSettings.applicationsOpen) {
     return (
       <div className="max-w-2xl mx-auto px-4 sm:px-6 py-20 text-center space-y-4">
+        <PageSeo
+          title="Applications Paused – Join HackerRank Campus Crew"
+          description={`Membership intake for HackerRank Campus Crew at ${siteSettings.collegeName} is currently paused.`}
+          canonicalPath="/join"
+        />
         <h1 className="font-mono text-3xl font-bold text-slate-900 dark:text-white">
           Membership Applications Paused
         </h1>
@@ -75,6 +81,13 @@ export const JoinUsPage: React.FC = () => {
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-14">
+      <PageSeo
+        title="Join HackerRank Campus Crew"
+        description={`Apply to join the HackerRank Campus Crew at ${siteSettings.collegeName}. Practice DSA, participate in coding sprints, and grow with peers.`}
+        canonicalPath="/join"
+        image={CHAPTER_IMAGES.hero}
+        keywords={['Join Coding Club', 'Paavai Student Membership', 'HackerRank Campus Crew']}
+      />
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         {/* Left Context Column */}
         <div className="lg:col-span-5 space-y-5">

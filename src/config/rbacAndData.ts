@@ -210,6 +210,7 @@ export interface UserAccount {
   department: string;
   year: string;
   phone: string;
+  photoUrl?: string;
   hackerRankHandle: string;
   hackerRankUrl?: string;
   githubUrl?: string;
@@ -227,6 +228,7 @@ export interface PublicProfile {
   department: string;
   year: string;
   bio: string;
+  photoUrl?: string;
   skills: string[];
   hackerRankHandle: string;
   hackerRankUrl?: string;
@@ -246,6 +248,7 @@ export interface TeamMember {
   department: string;
   year: string;
   bio: string;
+  photoUrl?: string;
   hackerRankHandle: string;
   updatedAt?: string;
 }

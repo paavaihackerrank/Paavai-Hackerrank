@@ -3,6 +3,7 @@ import { ChevronDown, Mail, MapPin } from 'lucide-react';
 import { FAQ_ITEMS } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 import { EmailDeliveryFaq } from '../components/EmailDeliveryFaq';
+import { PageSeo } from '../components/PageSeo';
 
 export const ContactFaqPage: React.FC = () => {
   const { siteSettings, addToast } = useApp();
@@ -40,6 +41,24 @@ export const ContactFaqPage: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 space-y-16">
+      <PageSeo
+        title="FAQ & Contact"
+        description={`Answers about joining HackerRank Campus Crew, email verification whitelisting, contests, and contacting chapter coordinators at ${siteSettings.collegeName}.`}
+        canonicalPath="/contact"
+        keywords={['Campus Crew FAQ', 'Email Verification Help', 'Contact Paavai Coding Club']}
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'FAQPage',
+          mainEntity: FAQ_ITEMS.map((item) => ({
+            '@type': 'Question',
+            name: item.question,
+            acceptedAnswer: {
+              '@type': 'Answer',
+              text: item.answer,
+            },
+          })),
+        }}
+      />
       <header className="max-w-2xl space-y-3">
         <p className="font-mono text-xs font-semibold text-[#009942] dark:text-[#00EA64]">
           Help Center & Chapter Desk

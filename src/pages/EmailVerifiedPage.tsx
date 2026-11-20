@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, BookOpen, Calendar, CheckCircle2 } from 'lucide-react';
 import { ROLE_META, getDashboardPath } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
+import { PageSeo } from '../components/PageSeo';
 
 export const EmailVerifiedPage: React.FC = () => {
   const { currentUser, currentRole, firebaseUser } = useApp();
@@ -15,6 +16,11 @@ export const EmailVerifiedPage: React.FC = () => {
 
   return (
     <div className="max-w-xl mx-auto px-4 sm:px-6 py-16">
+      <PageSeo
+        title="Email Verified"
+        description="Your HackerRank Campus Crew – Paavai Engineering College email address is verified."
+        noIndex
+      />
       <div className="p-7 sm:p-9 rounded-2xl border border-[#00EA64]/40 bg-white dark:bg-[#121821] space-y-6">
         <div className="w-12 h-12 rounded-xl bg-[#00EA64]/15 border border-[#00EA64]/40 flex items-center justify-center text-[#009942] dark:text-[#00EA64]">
           <CheckCircle2 className="w-6 h-6" aria-hidden="true" />

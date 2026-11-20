@@ -16,6 +16,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { CAMPUS_LEAD_EMAIL } from '../lib/firebase';
 import firebaseAppletConfig from '../../firebase-applet-config.json';
+import { PageSeo } from '../components/PageSeo';
 
 export const EmailDebugPage: React.FC = () => {
   const {
@@ -127,6 +128,11 @@ export const EmailDebugPage: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12 space-y-8">
+      <PageSeo
+        title="Email Delivery Diagnostics"
+        description="Campus Lead Firebase email delivery diagnostics and template preview."
+        noIndex
+      />
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-6">
         <div className="space-y-1.5">

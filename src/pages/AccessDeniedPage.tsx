@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { ShieldAlert } from 'lucide-react';
 import { ROLE_META } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
+import { PageSeo } from '../components/PageSeo';
 
 interface DeniedLocationState {
   from?: string;
@@ -17,6 +18,11 @@ export const AccessDeniedPage: React.FC = () => {
 
   return (
     <div className="max-w-xl mx-auto px-4 sm:px-6 py-20">
+      <PageSeo
+        title="Access Denied (403)"
+        description="Insufficient privileges to access the requested HackerRank Campus Crew workspace."
+        noIndex
+      />
       <div className="p-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] space-y-6">
         <div className="w-12 h-12 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-500">
           <ShieldAlert className="w-6 h-6" aria-hidden="true" />

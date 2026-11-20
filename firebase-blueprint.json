@@ -15,6 +15,7 @@
         "role": { "type": "string", "enum": ["lead", "crew", "member"] },
         "emailVerified": { "type": "boolean" },
         "phone": { "type": "string", "minLength": 0, "maxLength": 20 },
+        "photoUrl": { "type": "string", "minLength": 0, "maxLength": 500 },
         "hackerRankHandle": { "type": "string", "minLength": 0, "maxLength": 60 },
         "hackerRankUrl": { "type": "string", "minLength": 0, "maxLength": 300 },
         "githubUrl": { "type": "string", "minLength": 0, "maxLength": 300 },
@@ -183,6 +184,7 @@
         "department": { "type": "string", "minLength": 2, "maxLength": 40 },
         "year": { "type": "string", "minLength": 2, "maxLength": 20 },
         "bio": { "type": "string", "minLength": 0, "maxLength": 500 },
+        "photoUrl": { "type": "string", "minLength": 0, "maxLength": 500 },
         "hackerRankHandle": { "type": "string", "minLength": 0, "maxLength": 60 },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -198,6 +200,7 @@
         "department": { "type": "string", "minLength": 2, "maxLength": 40 },
         "year": { "type": "string", "minLength": 2, "maxLength": 20 },
         "bio": { "type": "string", "minLength": 0, "maxLength": 500 },
+        "photoUrl": { "type": "string", "minLength": 0, "maxLength": 500 },
         "skills": { "type": "array", "description": "Up to 12 skill tags" },
         "hackerRankHandle": { "type": "string", "minLength": 0, "maxLength": 60 },
         "hackerRankUrl": { "type": "string", "minLength": 0, "maxLength": 300 },

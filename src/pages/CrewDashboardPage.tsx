@@ -34,6 +34,7 @@ import { useApp } from '../context/AppContext';
 
 import { MemberDirectoryPanel, JoinRequestsPanel, SiteSettingsPanel } from './AdminPanelPage';
 import { EventCheckInQRGenerator } from '../components/EventCheckInQRGenerator';
+import { PageSeo } from '../components/PageSeo';
 
 type DashboardTab =
   | 'members'
@@ -356,6 +357,11 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12 space-y-8">
+      <PageSeo
+        title={`${isLead ? 'Lead Dashboard' : 'Crew Dashboard'} – ${activeClusterAndItem.item.label}`}
+        description="Campus Lead and Crew operations console for managing HackerRank Campus Crew events, members, and announcements."
+        noIndex
+      />
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-6">
         <div className="space-y-1.5">
           <p className="font-mono text-xs font-semibold text-[#009942] dark:text-[#00EA64]">

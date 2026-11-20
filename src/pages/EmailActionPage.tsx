@@ -12,6 +12,7 @@ import {
   MailCheck,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { PageSeo } from '../components/PageSeo';
 
 type ActionPhase = 'checking' | 'reset_form' | 'success' | 'error';
 
@@ -123,6 +124,11 @@ export const EmailActionPage: React.FC = () => {
 
   return (
     <div className="max-w-lg mx-auto px-4 sm:px-6 py-16">
+      <PageSeo
+        title={mode === 'resetPassword' ? 'Reset Password' : 'Email Action Verification'}
+        description="Complete email verification or password reset for your HackerRank Campus Crew account."
+        noIndex
+      />
       <div className="p-7 sm:p-8 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] space-y-6">
         {phase === 'checking' && (
           <div className="flex flex-col items-center text-center py-6 space-y-3">

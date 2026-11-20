@@ -7,6 +7,7 @@ import { useApp } from '../context/AppContext';
 import { SafeImage } from '../components/SafeImage';
 import { MemberSpotlight } from '../components/MemberSpotlight';
 import { UpcomingEventsTicker } from '../components/UpcomingEventsTicker';
+import { PageSeo, SITE_NAME } from '../components/PageSeo';
 
 export const HomePage: React.FC = () => {
   const {
@@ -36,6 +37,29 @@ export const HomePage: React.FC = () => {
 
   return (
     <div>
+      <PageSeo
+        title={SITE_NAME}
+        description={`${siteSettings.tagline} Official competitive programming hub, live events, campus leaderboard, and DSA learning roadmaps of ${siteSettings.chapterName} at ${siteSettings.collegeName}.`}
+        canonicalPath="/"
+        image={CHAPTER_IMAGES.hero}
+        imageAlt="HackerRank Campus Crew coding session at Paavai Engineering College"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'EducationalOrganization',
+          name: `${siteSettings.chapterName} – ${siteSettings.collegeName}`,
+          description:
+            'Official student-led competitive programming and computer science community at Paavai Engineering College, Namakkal.',
+          slogan: siteSettings.tagline,
+          address: {
+            '@type': 'PostalAddress',
+            streetAddress: siteSettings.campusLocation,
+            addressLocality: 'Namakkal',
+            addressRegion: 'Tamil Nadu',
+            postalCode: '637018',
+            addressCountry: 'IN',
+          },
+        }}
+      />
       {/* Approved Campus Announcement Strip */}
       {approvedAnnouncements.length > 0 && (
         <div className="border-b border-slate-200 dark:border-slate-800/80 bg-slate-100/90 dark:bg-[#101720]">

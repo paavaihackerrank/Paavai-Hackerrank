@@ -13,6 +13,7 @@ import {
 import { EventCheckIn, EventCheckInCode } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 import { NotificationBanner } from '../components/NotificationBanner';
+import { PageSeo } from '../components/PageSeo';
 
 interface BarcodeDetectorResult {
   rawValue?: string;
@@ -224,6 +225,11 @@ export const EventCheckInPage: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-14 space-y-8">
+      <PageSeo
+        title="Event QR Check-In"
+        description="Verify attendance at Paavai HackerRank Campus Crew coding contests and workshops using your event QR check-in code."
+        canonicalPath="/checkin"
+      />
       <header className="space-y-2 border-b border-slate-200 dark:border-slate-800 pb-6">
         <p className="font-mono text-xs font-semibold text-[#009942] dark:text-[#00EA64]">
           Event Attendance · QR Check-In Verification

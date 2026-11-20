@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowUpDown, Lock, Search } from 'lucide-react';
-import { DEPARTMENTS } from '../config/rbacAndData';
+import { DEPARTMENTS, CHAPTER_IMAGES } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
+import { PageSeo } from '../components/PageSeo';
 
 type SortField = 'rank' | 'name' | 'department' | 'year' | 'score' | 'problemsSolved';
 
@@ -66,6 +67,13 @@ export const LeaderboardPage: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 space-y-8">
+      <PageSeo
+        title="Campus Leaderboard"
+        description={`Explore verified competitive programming standings across ${leaderboard.length} coders at ${siteSettings.collegeName}.`}
+        canonicalPath="/leaderboard"
+        image={CHAPTER_IMAGES.awardCeremony}
+        keywords={['Campus Leaderboard', 'HackerRank Standings', 'Top Coders Paavai']}
+      />
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="space-y-3 max-w-2xl">
           <p className="font-mono text-xs font-semibold text-[#009942] dark:text-[#00EA64]">
@@ -176,7 +184,12 @@ export const LeaderboardPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="py-3.5 px-4">
-                      <p className="font-semibold text-slate-900 dark:text-white">{row.name}</p>
+                      <Link
+                        to={`/members/${encodeURIComponent(row.hackerRankHandle || row.id)}`}
+                        className="font-semibold text-slate-900 dark:text-white hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors"
+                      >
+                        {row.name}
+                      </Link>
                       <p className="font-mono text-xs text-slate-500 dark:text-slate-400">
                         {row.hackerRankHandle} · {row.registerNumber}
                       </p>

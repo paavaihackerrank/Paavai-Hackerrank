@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   BookOpen,
   Calendar,
-  ExternalLink,
   Search,
   User as UserIcon,
   X,
@@ -18,20 +17,7 @@ interface SearchResultItem {
   title: string;
   subtitle: string;
   tags: string[];
-  to?: string;
-  memberModal?: {
-    name: string;
-    department: string;
-    year: string;
-    bio: string;
-    hackerRankHandle?: string;
-    hackerRankUrl?: string;
-    githubUrl?: string;
-    linkedinUrl?: string;
-    skills: string[];
-    completedDsaCount?: number;
-    completedRoadmapCount?: number;
-  };
+  to: string;
 }
 
 const normalize = (v?: string) => (v || '').trim().toLowerCase().replace(/^@/, '');
@@ -57,8 +43,6 @@ export const GlobalSearchBar: React.FC<{ onNavigate?: () => void }> = ({ onNavig
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mobileModalOpen, setMobileModalOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [selectedMemberModal, setSelectedMemberModal] =
-    useState<SearchResultItem['memberModal'] | null>(null);
 
   const canViewFullResources = can('canViewFullResources');
   const canViewFullLeaderboard = can('canViewFullLeaderboard');
@@ -82,7 +66,7 @@ export const GlobalSearchBar: React.FC<{ onNavigate?: () => void }> = ({ onNavig
           title: ev.title,
           subtitle: `${ev.category} · ${formattedDate} · ${ev.venue}`,
           tags: [ev.category, ev.venue, ev.membersOnly ? 'Members Only' : 'Open'],
-          to: `/events?q=${encodeURIComponent(ev.title)}`,
+          to: `/events/${encodeURIComponent(ev.id)}`,
         });
       });
 
@@ -117,7 +101,7 @@ export const GlobalSearchBar: React.FC<{ onNavigate?: () => void }> = ({ onNavig
           tm.hackerRankHandle || '',
           tm.role === 'lead' ? 'Campus Lead' : 'Campus Crew',
         ].filter(Boolean),
-        to: `/team?q=${encodeURIComponent(tm.name)}`,
+        to: `/members/${encodeURIComponent(tm.uid || tm.id)}`,
       });
     });
 
@@ -141,7 +125,7 @@ export const GlobalSearchBar: React.FC<{ onNavigate?: () => void }> = ({ onNavig
           title: lb.name,
           subtitle: `Rank #${idx + 1} · ${lb.department} · ${lb.hackerRankHandle}`,
           tags: [lb.department, lb.year, lb.hackerRankHandle, 'Leaderboard'].filter(Boolean),
-          to: `/leaderboard?q=${encodeURIComponent(lb.name)}`,
+          to: `/members/${encodeURIComponent(lb.hackerRankHandle || lb.id)}`,
         });
       }
     });
@@ -169,19 +153,7 @@ export const GlobalSearchBar: React.FC<{ onNavigate?: () => void }> = ({ onNavig
             pp.hackerRankHandle || '',
             ...(pp.skills || []),
           ].filter(Boolean),
-          memberModal: {
-            name: pp.name,
-            department: pp.department,
-            year: pp.year,
-            bio: pp.bio,
-            hackerRankHandle: pp.hackerRankHandle,
-            hackerRankUrl: pp.hackerRankUrl,
-            githubUrl: pp.githubUrl,
-            linkedinUrl: pp.linkedinUrl,
-            skills: pp.skills || [],
-            completedDsaCount: pp.completedDsaCount,
-            completedRoadmapCount: pp.completedRoadmapCount,
-          },
+          to: `/members/${encodeURIComponent(pp.uid || pp.id)}`,
         });
       }
     });
@@ -255,7 +227,6 @@ export const GlobalSearchBar: React.FC<{ onNavigate?: () => void }> = ({ onNavig
       if (e.key === 'Escape') {
         setDropdownOpen(false);
         setMobileModalOpen(false);
-        setSelectedMemberModal(null);
       }
     };
 
@@ -279,12 +250,7 @@ export const GlobalSearchBar: React.FC<{ onNavigate?: () => void }> = ({ onNavig
     setMobileModalOpen(false);
     setQueryText('');
     onNavigate?.();
-
-    if (item.to) {
-      navigate(item.to);
-    } else if (item.memberModal) {
-      setSelectedMemberModal(item.memberModal);
-    }
+    navigate(item.to);
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -512,103 +478,6 @@ export const GlobalSearchBar: React.FC<{ onNavigate?: () => void }> = ({ onNavig
               </button>
             </div>
             {renderResultsList()}
-          </div>
-        </div>
-      )}
-
-      {/* Non-PII Community Member Quick Profile Modal (for Spotlight / PublicProfile results) */}
-      {selectedMemberModal && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs p-4 flex items-center justify-center"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setSelectedMemberModal(null);
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${selectedMemberModal.name} community profile`}
-            className="w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] p-6 space-y-4 shadow-2xl"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-1">
-                <p className="font-mono text-xs text-[#009942] dark:text-[#00EA64]">
-                  Community Member · {selectedMemberModal.department} · {selectedMemberModal.year}
-                </p>
-                <h3 className="font-mono text-lg font-bold text-slate-900 dark:text-white">
-                  {selectedMemberModal.name}
-                </h3>
-                {selectedMemberModal.hackerRankHandle && (
-                  <p className="font-mono text-xs text-slate-500 dark:text-slate-400">
-                    HackerRank: {selectedMemberModal.hackerRankHandle}
-                  </p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedMemberModal(null)}
-                aria-label="Close member preview"
-                className="w-9 h-9 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white shrink-0"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {selectedMemberModal.bio && (
-              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                {selectedMemberModal.bio}
-              </p>
-            )}
-
-            {(selectedMemberModal.completedRoadmapCount !== undefined ||
-              selectedMemberModal.completedDsaCount !== undefined) && (
-              <p className="text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums">
-                {selectedMemberModal.completedRoadmapCount ?? 0} roadmap modules completed ·{' '}
-                {selectedMemberModal.completedDsaCount ?? 0} DSA modules
-              </p>
-            )}
-
-            {selectedMemberModal.skills.length > 0 && (
-              <p className="text-xs font-mono text-slate-600 dark:text-slate-300">
-                Skills: {selectedMemberModal.skills.join(' · ')}
-              </p>
-            )}
-
-            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
-              {selectedMemberModal.hackerRankUrl && (
-                <a
-                  href={selectedMemberModal.hackerRankUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-md text-xs font-mono border border-slate-200 dark:border-slate-700 hover:border-[#00EA64] inline-flex items-center gap-1"
-                >
-                  <span>HackerRank</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
-              {selectedMemberModal.githubUrl && (
-                <a
-                  href={selectedMemberModal.githubUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-md text-xs font-mono border border-slate-200 dark:border-slate-700 hover:border-[#00EA64] inline-flex items-center gap-1"
-                >
-                  <span>GitHub</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
-              {selectedMemberModal.linkedinUrl && (
-                <a
-                  href={selectedMemberModal.linkedinUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-md text-xs font-mono border border-slate-200 dark:border-slate-700 hover:border-[#00EA64] inline-flex items-center gap-1"
-                >
-                  <span>LinkedIn</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
-            </div>
           </div>
         </div>
       )}
