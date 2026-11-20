@@ -4,6 +4,7 @@ import { Calendar, CheckCircle2 } from 'lucide-react';
 import { ACADEMIC_YEARS, DEPARTMENTS, ROLE_META } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 import { NotificationBanner } from '../components/NotificationBanner';
+import { ProfileBadges } from '../components/ProfileBadges';
 
 export const ProfilePage: React.FC = () => {
   const {
@@ -12,6 +13,9 @@ export const ProfilePage: React.FC = () => {
     needsEmailVerification,
     unverifiedEmail,
     events,
+    resources,
+    completedResourceIds,
+    leaderboard,
     registrations,
     updateOwnProfile,
     cancelRegistration,
@@ -100,6 +104,13 @@ export const ProfilePage: React.FC = () => {
           {currentUser.email} · Reg No. {currentUser.regNo} · Joined {currentUser.joinedAt}
         </p>
       </header>
+
+      <ProfileBadges
+        user={currentUser}
+        resources={resources}
+        completedResourceIds={completedResourceIds}
+        leaderboard={leaderboard}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Edit Profile Form */}
