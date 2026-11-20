@@ -1,5 +1,6 @@
 import React from 'react';
-import { Code2, ShieldCheck, Users } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Code2, ShieldCheck, Users, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 function getInitials(name: string): string {
@@ -11,11 +12,22 @@ function getInitials(name: string): string {
 
 export const TeamPage: React.FC = () => {
   const { teamMembers } = useApp();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryFilter = (searchParams.get('q') || '').trim();
+  const qLower = queryFilter.toLowerCase();
 
-  const leads = teamMembers
+  const visibleMembers = qLower
+    ? teamMembers.filter((m) =>
+        `${m.name} ${m.designation} ${m.department} ${m.year} ${m.hackerRankHandle} ${m.bio}`
+          .toLowerCase()
+          .includes(qLower)
+      )
+    : teamMembers;
+
+  const leads = visibleMembers
     .filter((m) => m.role === 'lead')
     .sort((a, b) => a.name.localeCompare(b.name));
-  const crewMembers = teamMembers
+  const crewMembers = visibleMembers
     .filter((m) => m.role === 'crew')
     .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -34,7 +46,27 @@ export const TeamPage: React.FC = () => {
         </p>
       </header>
 
-      {teamMembers.length === 0 ? (
+      {queryFilter && (
+        <div className="px-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] flex items-center justify-between gap-3 text-xs font-mono">
+          <span className="text-slate-600 dark:text-slate-300">
+            Showing team members matching <strong className="text-slate-900 dark:text-white">&quot;{queryFilter}&quot;</strong> ({visibleMembers.length})
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete('q');
+              setSearchParams(next);
+            }}
+            className="text-[#009942] dark:text-[#00EA64] hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+          >
+            <X className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>Clear filter</span>
+          </button>
+        </div>
+      )}
+
+      {visibleMembers.length === 0 ? (
         <div className="p-10 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] text-center space-y-2">
           <Users className="w-7 h-7 text-slate-400 mx-auto" aria-hidden="true" />
           <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white">

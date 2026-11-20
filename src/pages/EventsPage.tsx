@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Calendar, CheckCircle2, Clock, Lock, MapPin, QrCode, Users } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Calendar, CheckCircle2, Clock, Lock, MapPin, QrCode, Users, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { SafeImage } from '../components/SafeImage';
 
@@ -24,6 +24,8 @@ export const EventsPage: React.FC = () => {
     cancelRegistration,
   } = useApp();
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryFilter = (searchParams.get('q') || '').trim();
   const [filter, setFilter] = useState<'all' | 'upcoming' | 'members' | 'past'>('all');
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
@@ -42,14 +44,19 @@ export const EventsPage: React.FC = () => {
   );
 
   const filteredEvents = useMemo(() => {
+    const qLower = queryFilter.toLowerCase();
     return approvedEvents.filter((ev) => {
       const isUpcoming = new Date(ev.dateISO).getTime() > nowMs;
-      if (filter === 'upcoming') return isUpcoming;
-      if (filter === 'past') return !isUpcoming;
-      if (filter === 'members') return ev.membersOnly;
+      if (filter === 'upcoming' && !isUpcoming) return false;
+      if (filter === 'past' && isUpcoming) return false;
+      if (filter === 'members' && !ev.membersOnly) return false;
+      if (qLower) {
+        const hay = `${ev.title} ${ev.category} ${ev.venue} ${ev.description}`.toLowerCase();
+        if (!hay.includes(qLower)) return false;
+      }
       return true;
     });
-  }, [approvedEvents, filter, nowMs]);
+  }, [approvedEvents, filter, nowMs, queryFilter]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 space-y-10">
@@ -102,6 +109,26 @@ export const EventsPage: React.FC = () => {
           </div>
         </div>
       </header>
+
+      {queryFilter && (
+        <div className="px-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] flex items-center justify-between gap-3 text-xs font-mono">
+          <span className="text-slate-600 dark:text-slate-300">
+            Showing events matching <strong className="text-slate-900 dark:text-white">&quot;{queryFilter}&quot;</strong> ({filteredEvents.length})
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete('q');
+              setSearchParams(next);
+            }}
+            className="text-[#009942] dark:text-[#00EA64] hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+          >
+            <X className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>Clear filter</span>
+          </button>
+        </div>
+      )}
 
       {filteredEvents.length === 0 ? (
         <div className="p-12 text-center rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821]">

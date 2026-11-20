@@ -15,6 +15,7 @@ import {
 import { ROLE_META, UserRole, getDashboardPath } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 import { Footer } from './Footer';
+import { GlobalSearchBar } from './GlobalSearchBar';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const {
@@ -97,8 +98,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             ))}
           </nav>
 
-          {/* Zone 3: Theme Toggle & Auth Controls */}
+          {/* Zone 3: Global Search, Theme Toggle & Auth Controls */}
           <div className="flex items-center gap-2.5 shrink-0">
+            <GlobalSearchBar onNavigate={() => setMobileMenuOpen(false)} />
 
             {/* Dark / Light Toggle */}
             <button

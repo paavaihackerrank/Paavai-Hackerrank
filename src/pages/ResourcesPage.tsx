@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { CheckCircle2, Circle, ExternalLink, Lock } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { CheckCircle2, Circle, ExternalLink, Lock, X } from 'lucide-react';
 import { ResourceTrack } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 
@@ -15,13 +15,23 @@ const TRACKS: Array<'All' | ResourceTrack> = [
 
 export const ResourcesPage: React.FC = () => {
   const { resources, can, currentUser, completedResourceIds, toggleResourceCompleted } = useApp();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryFilter = (searchParams.get('q') || '').trim();
   const [selectedTrack, setSelectedTrack] = useState<'All' | ResourceTrack>('All');
 
   const canViewFull = can('canViewFullResources');
 
   const filtered = useMemo(() => {
-    return resources.filter((r) => selectedTrack === 'All' || r.track === selectedTrack);
-  }, [resources, selectedTrack]);
+    const qLower = queryFilter.toLowerCase();
+    return resources.filter((r) => {
+      if (selectedTrack !== 'All' && r.track !== selectedTrack) return false;
+      if (qLower) {
+        const hay = `${r.title} ${r.track} ${r.level} ${r.summary} ${(r.topics || []).join(' ')}`.toLowerCase();
+        if (!hay.includes(qLower)) return false;
+      }
+      return true;
+    });
+  }, [resources, selectedTrack, queryFilter]);
 
   const unlockedCount = resources.filter((r) => canViewFull || r.access === 'basic').length;
   const completedCount = resources.filter((r) => completedResourceIds.includes(r.id)).length;
@@ -82,6 +92,26 @@ export const ResourcesPage: React.FC = () => {
           ))}
         </div>
       </header>
+
+      {queryFilter && (
+        <div className="px-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] flex items-center justify-between gap-3 text-xs font-mono">
+          <span className="text-slate-600 dark:text-slate-300">
+            Showing roadmap modules matching <strong className="text-slate-900 dark:text-white">&quot;{queryFilter}&quot;</strong> ({filtered.length})
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete('q');
+              setSearchParams(next);
+            }}
+            className="text-[#009942] dark:text-[#00EA64] hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+          >
+            <X className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>Clear filter</span>
+          </button>
+        </div>
+      )}
 
       {/* Resource Access Banner for Guests */}
       {!canViewFull && (

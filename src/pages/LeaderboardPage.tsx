@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowUpDown, Lock, Search } from 'lucide-react';
 import { DEPARTMENTS } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
@@ -8,10 +8,16 @@ type SortField = 'rank' | 'name' | 'department' | 'year' | 'score' | 'problemsSo
 
 export const LeaderboardPage: React.FC = () => {
   const { leaderboard, can, siteSettings } = useApp();
-  const [search, setSearch] = useState('');
+  const [searchParams] = useSearchParams();
+  const urlQuery = searchParams.get('q') || '';
+  const [search, setSearch] = useState(urlQuery);
   const [deptFilter, setDeptFilter] = useState('ALL');
   const [sortField, setSortField] = useState<SortField>('rank');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  useEffect(() => {
+    setSearch(urlQuery);
+  }, [urlQuery]);
 
   const canViewFull = can('canViewFullLeaderboard');
   const guestLimit = siteSettings.publicLeaderboardLimit;
