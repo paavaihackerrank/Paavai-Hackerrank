@@ -234,6 +234,56 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "createdAt"]
+    },
+    "EventCheckInCode": {
+      "title": "EventCheckInCode",
+      "description": "Unique QR check-in code generated for a campus event.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "minLength": 6, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "eventId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "eventTitle": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "venue": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "isActive": { "type": "boolean" },
+        "createdByUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdByName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "eventId", "eventTitle", "venue", "isActive", "createdByUid", "createdByName", "createdAt"]
+    },
+    "EventCheckIn": {
+      "title": "EventCheckIn",
+      "description": "Attendee check-in record created in Firestore when an event QR code is scanned.",
+      "type": "object",
+      "properties": {
+        "checkInCode": { "type": "string", "minLength": 6, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "eventId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "eventTitle": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "userEmail": { "type": "string", "format": "email", "minLength": 5, "maxLength": 160 },
+        "collegeEmail": { "type": "string", "minLength": 0, "maxLength": 160 },
+        "registerNumber": { "type": "string", "minLength": 4, "maxLength": 20, "pattern": "^[A-Za-z0-9\\-]+$" },
+        "department": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "year": { "type": "string", "minLength": 2, "maxLength": 20 },
+        "phone": { "type": "string", "minLength": 0, "maxLength": 20 },
+        "checkedInAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["checkInCode", "eventId", "eventTitle", "userId", "userName", "userEmail", "registerNumber", "department", "year", "checkedInAt"]
+    },
+    "CodingActivity": {
+      "title": "CodingActivity",
+      "description": "User-logged coding completion entry across HackerRank, LeetCode, GitHub, CodeChef, DSA Roadmap, and Campus Events.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "platform": { "type": "string", "enum": ["HackerRank", "LeetCode", "GitHub", "CodeChef", "DSA Roadmap", "Campus Event"] },
+        "date": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "count": { "type": "number" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "platform", "date", "count", "title", "createdAt"]
     }
   },
   "firestore": {
@@ -300,6 +350,18 @@
     "/unique_college_emails/{emailHash}": {
       "schema": { "$ref": "#/entities/UniqueIndexLock" },
       "description": "Hash-keyed uniqueness locks for Paavai college email IDs (single-doc get allowed, list denied)."
+    },
+    "/event_checkin_codes/{checkInCode}": {
+      "schema": { "$ref": "#/entities/EventCheckInCode" },
+      "description": "Unique QR check-in session codes per event (non-PII single-doc lookup allowed; list/create/toggle restricted to Crew & Lead)."
+    },
+    "/event_checkins/{checkInId}": {
+      "schema": { "$ref": "#/entities/EventCheckIn" },
+      "description": "Attendee check-in records stored when QR codes are scanned; readable by owner, Crew, or Lead."
+    },
+    "/coding_activities/{activityId}": {
+      "schema": { "$ref": "#/entities/CodingActivity" },
+      "description": "Per-user logged coding completions across HackerRank and tracked platforms; strictly owner or Campus Lead readable."
     }
   }
 }

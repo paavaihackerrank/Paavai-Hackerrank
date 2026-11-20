@@ -323,6 +323,33 @@ export interface EventRegistration {
   registeredAt: string;
 }
 
+export interface EventCheckInCode {
+  code: string;
+  eventId: string;
+  eventTitle: string;
+  venue: string;
+  isActive: boolean;
+  createdByUid: string;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface EventCheckIn {
+  id: string;
+  checkInCode: string;
+  eventId: string;
+  eventTitle: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  collegeEmail?: string;
+  registerNumber: string;
+  department: string;
+  year: string;
+  phone?: string;
+  checkedInAt: string;
+}
+
 export interface JoinRequest {
   id: string;
   name: string;
@@ -363,6 +390,33 @@ export interface EmailSendAttempt {
   continueUrl?: string;
   actorUid?: string;
   attemptedAt: string;
+}
+
+export type CodingPlatform =
+  | 'HackerRank'
+  | 'LeetCode'
+  | 'GitHub'
+  | 'CodeChef'
+  | 'DSA Roadmap'
+  | 'Campus Event';
+
+export const CODING_PLATFORMS: CodingPlatform[] = [
+  'HackerRank',
+  'LeetCode',
+  'GitHub',
+  'CodeChef',
+  'DSA Roadmap',
+  'Campus Event',
+];
+
+export interface CodingActivity {
+  id: string;
+  userId: string;
+  platform: CodingPlatform;
+  date: string;
+  count: number;
+  title: string;
+  createdAt: string;
 }
 
 /**

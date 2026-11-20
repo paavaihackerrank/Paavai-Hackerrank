@@ -6,6 +6,7 @@ import { useApp } from '../context/AppContext';
 import { NotificationBanner } from '../components/NotificationBanner';
 import { ProfileBadges } from '../components/ProfileBadges';
 import { SocialConnections } from '../components/SocialConnections';
+import { CodingActivityHeatmap } from '../components/CodingActivityHeatmap';
 
 export const ProfilePage: React.FC = () => {
   const {
@@ -16,10 +17,14 @@ export const ProfilePage: React.FC = () => {
     events,
     resources,
     completedResourceIds,
+    codingActivities,
+    eventCheckIns,
     leaderboard,
     registrations,
     updateOwnProfile,
     cancelRegistration,
+    logCodingActivity,
+    deleteCodingActivity,
   } = useApp();
   const navigate = useNavigate();
 
@@ -116,6 +121,14 @@ export const ProfilePage: React.FC = () => {
         resources={resources}
         completedResourceIds={completedResourceIds}
         leaderboard={leaderboard}
+      />
+
+      <CodingActivityHeatmap
+        user={currentUser}
+        codingActivities={codingActivities}
+        eventCheckIns={eventCheckIns}
+        onLogActivity={logCodingActivity}
+        onDeleteActivity={deleteCodingActivity}
       />
 
       <SocialConnections

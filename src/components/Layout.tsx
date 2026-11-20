@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { ROLE_META, UserRole, getDashboardPath } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
+import { Footer } from './Footer';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const {
@@ -25,7 +26,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     unverifiedEmail,
     can,
     logout,
-    siteSettings,
     toasts,
     dismissToast,
   } = useApp();
@@ -285,99 +285,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       {/* Main Content */}
       <main className="flex-1">{children}</main>
 
-      {/* Footer */}
-      <footer className="border-t border-slate-200 dark:border-slate-800/90 bg-white dark:bg-[#0D1219] mt-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-10 pb-10 border-b border-slate-200 dark:border-slate-800">
-            <div className="md:col-span-2 space-y-3">
-              <div className="flex items-center gap-2.5 font-mono text-base font-bold text-slate-900 dark:text-white">
-                <span className="w-7 h-7 rounded-md bg-[#00EA64] text-[#0B0F14] flex items-center justify-center">
-                  <Terminal className="w-4 h-4 stroke-[2.5]" aria-hidden="true" />
-                </span>
-                <span>
-                  {siteSettings.chapterName} – {siteSettings.collegeName}
-                </span>
-              </div>
-              <p className="text-sm text-slate-600 dark:text-slate-400 max-w-md leading-relaxed">
-                {siteSettings.tagline} Official student-driven algorithmic programming and interview
-                preparation chapter at {siteSettings.collegeName}.
-              </p>
-              <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
-                {siteSettings.campusLocation} · {siteSettings.contactEmail}
-              </p>
-            </div>
-
-            <div>
-              <h3 className="font-mono text-sm font-semibold text-slate-900 dark:text-white mb-3">
-                Explore
-              </h3>
-              <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-400">
-                <li>
-                  <Link to="/events" className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors">
-                    Events & Contests
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/leaderboard" className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors">
-                    Campus Leaderboard
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/resources" className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors">
-                    Learning Roadmap
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/gallery" className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors">
-                    Event Gallery
-                  </Link>
-                </li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 className="font-mono text-sm font-semibold text-slate-900 dark:text-white mb-3">
-                Community
-              </h3>
-              <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-400">
-                <li>
-                  <Link to="/team" className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors">
-                    Crew & Leadership
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/join" className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors">
-                    Request to Join
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/contact" className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors">
-                    FAQ & Contact
-                  </Link>
-                </li>
-                {currentUser && (
-                  <li>
-                    <Link to="/profile" className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors">
-                      My Profile
-                    </Link>
-                  </li>
-                )}
-              </ul>
-            </div>
-          </div>
-
-          <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500 dark:text-slate-400">
-            <p className="font-medium text-slate-700 dark:text-slate-300">
-              Made by the HackerRank Campus Crew, Paavai Engineering College
-            </p>
-            <p className="font-mono">
-              {currentUser
-                ? `Signed in: ${ROLE_META[currentRole].label}`
-                : 'Paavai Engineering College · Verified Portal'}
-            </p>
-          </div>
-        </div>
-      </footer>
+      <Footer />
 
       {/* Accessible Toast Notification Stack */}
       <div

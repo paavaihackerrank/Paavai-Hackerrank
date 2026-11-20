@@ -274,6 +274,47 @@ service cloud.firestore {
         && isValidTimestampStr(data.attemptedAt);
     }
 
+    function isValidEventCheckInCode(data) {
+      return data.keys().hasAll(['code', 'eventId', 'eventTitle', 'venue', 'isActive', 'createdByUid', 'createdByName', 'createdAt'])
+        && data.keys().hasOnly(['code', 'eventId', 'eventTitle', 'venue', 'isActive', 'createdByUid', 'createdByName', 'createdAt'])
+        && data.code is string && data.code.size() >= 6 && data.code.size() <= 64 && data.code.matches('^[a-zA-Z0-9_\\-]+$')
+        && isValidId(data.eventId)
+        && data.eventTitle is string && data.eventTitle.size() >= 2 && data.eventTitle.size() <= 140
+        && data.venue is string && data.venue.size() >= 2 && data.venue.size() <= 160
+        && data.isActive is bool
+        && isValidId(data.createdByUid)
+        && data.createdByName is string && data.createdByName.size() >= 2 && data.createdByName.size() <= 100
+        && isValidTimestampStr(data.createdAt);
+    }
+
+    function isValidEventCheckIn(data) {
+      return data.keys().hasAll(['checkInCode', 'eventId', 'eventTitle', 'userId', 'userName', 'userEmail', 'registerNumber', 'department', 'year', 'checkedInAt'])
+        && data.keys().hasOnly(['checkInCode', 'eventId', 'eventTitle', 'userId', 'userName', 'userEmail', 'collegeEmail', 'registerNumber', 'department', 'year', 'phone', 'checkedInAt'])
+        && data.checkInCode is string && data.checkInCode.size() >= 6 && data.checkInCode.size() <= 64 && data.checkInCode.matches('^[a-zA-Z0-9_\\-]+$')
+        && isValidId(data.eventId)
+        && data.eventTitle is string && data.eventTitle.size() >= 2 && data.eventTitle.size() <= 140
+        && isValidId(data.userId)
+        && data.userName is string && data.userName.size() >= 2 && data.userName.size() <= 100
+        && isValidEmail(data.userEmail)
+        && (!('collegeEmail' in data) || data.collegeEmail == '' || isValidEmail(data.collegeEmail))
+        && isValidRegNo(data.registerNumber)
+        && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
+        && data.year is string && data.year.size() >= 2 && data.year.size() <= 20
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 20))
+        && isValidTimestampStr(data.checkedInAt);
+    }
+
+    function isValidCodingActivity(data) {
+      return data.keys().hasAll(['userId', 'platform', 'date', 'count', 'title', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'platform', 'date', 'count', 'title', 'createdAt'])
+        && isValidId(data.userId)
+        && data.platform in ['HackerRank', 'LeetCode', 'GitHub', 'CodeChef', 'DSA Roadmap', 'Campus Event']
+        && data.date is string && data.date.size() == 10 && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.count is number && data.count >= 1 && data.count <= 500
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 140
+        && isValidTimestampStr(data.createdAt);
+    }
+
     // ------------------------------------------------------------------------
     // COLLECTION MATCH BLOCKS
     // ------------------------------------------------------------------------
@@ -536,6 +577,64 @@ service cloud.firestore {
       allow delete: if isValidSha256Hex(emailHash) && (
         isCampusLead() ||
         (hasAuthenticatedSession() && existing().uid == request.auth.uid)
+      );
+    }
+
+    // Event QR Check-In Codes (non-PII single-doc lookup for scan landing; list/create/toggle by Crew & Lead)
+    match /event_checkin_codes/{checkInCode} {
+      allow get: if isValidId(checkInCode);
+      allow list: if isCrewOrLead();
+
+      allow create: if signedIn() && isValidId(checkInCode) && isCrewOrLead()
+        && isValidEventCheckInCode(incoming())
+        && incoming().code == checkInCode
+        && incoming().createdByUid == request.auth.uid
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+
+      allow update: if signedIn() && isValidId(checkInCode) && isCrewOrLead()
+        && isValidEventCheckInCode(incoming())
+        && incoming().code == existing().code
+        && incoming().eventId == existing().eventId
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['isActive']);
+
+      allow delete: if isValidId(checkInCode) && isCampusLead();
+    }
+
+    // Event Check-Ins (Attendee details stored in Firestore when QR code is scanned)
+    match /event_checkins/{checkInId} {
+      allow get: if isValidId(checkInId) && (
+        isCrewOrLead() || (signedIn() && existing().userId == request.auth.uid)
+      );
+      allow list: if isCrewOrLead() || (signedIn() && existing().userId == request.auth.uid);
+
+      allow create: if signedIn() && isValidId(checkInId)
+        && isValidEventCheckIn(incoming())
+        && incoming().userId == request.auth.uid
+        && exists(/databases/$(database)/documents/event_checkin_codes/$(incoming().checkInCode))
+        && get(/databases/$(database)/documents/event_checkin_codes/$(incoming().checkInCode)).data.isActive == true
+        && get(/databases/$(database)/documents/event_checkin_codes/$(incoming().checkInCode)).data.eventId == incoming().eventId;
+
+      allow update: if false;
+      allow delete: if isValidId(checkInId) && isCampusLead();
+    }
+
+    // Coding Activity Logs for ProfilePage Contribution Heatmap
+    match /coding_activities/{activityId} {
+      allow get: if isValidId(activityId) && (
+        isCampusLead() || (signedIn() && existing().userId == request.auth.uid)
+      );
+      allow list: if isCampusLead() || (signedIn() && existing().userId == request.auth.uid);
+
+      allow create: if signedIn() && isValidId(activityId)
+        && isValidCodingActivity(incoming())
+        && incoming().userId == request.auth.uid;
+
+      allow update: if false;
+
+      allow delete: if isValidId(activityId) && (
+        isCampusLead() || (signedIn() && existing().userId == request.auth.uid)
       );
     }
   }

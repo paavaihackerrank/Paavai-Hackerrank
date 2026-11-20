@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { MailCheck } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Eye, EyeOff, MailCheck } from 'lucide-react';
 import { ACADEMIC_YEARS, DEPARTMENTS, getDashboardPath } from '../config/rbacAndData';
 import {
   isCollegeEmailId,
@@ -23,18 +23,23 @@ export const LoginPage: React.FC = () => {
     login,
   } = useApp();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const rawRedirect = searchParams.get('redirect') || '';
+  const safeRedirect =
+    rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [resetMode, setResetMode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (currentUser && currentRole !== 'outsider') {
-      navigate(getDashboardPath(currentRole), { replace: true });
+      navigate(safeRedirect || getDashboardPath(currentRole), { replace: true });
     }
-  }, [currentUser, currentRole, navigate]);
+  }, [currentUser, currentRole, navigate, safeRedirect]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,7 +62,7 @@ export const LoginPage: React.FC = () => {
     if (res.needsVerification) {
       return;
     }
-    navigate(res.redirectPath || '/dashboard/member', { replace: true });
+    navigate(safeRedirect || res.redirectPath || '/dashboard/member', { replace: true });
   };
 
   return (
@@ -65,7 +70,7 @@ export const LoginPage: React.FC = () => {
       {needsEmailVerification && unverifiedEmail ? (
         <NotificationBanner
           user={firebaseUser}
-          onVerified={(path) => navigate(path, { replace: true })}
+          onVerified={(path) => navigate(safeRedirect || path, { replace: true })}
         />
       ) : (
         <div
@@ -157,15 +162,30 @@ export const LoginPage: React.FC = () => {
                   Forgot password?
                 </button>
               </div>
-              <input
-                id="login-password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
-              />
+              <div className="relative">
+                <input
+                  id="login-password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full h-10 pl-3 pr-10 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                  className="absolute inset-y-0 right-0 w-10 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors rounded-r-lg"
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" aria-hidden="true" />
+                  ) : (
+                    <Eye className="w-4 h-4" aria-hidden="true" />
+                  )}
+                </button>
+              </div>
             </div>
             <button
               type="submit"
@@ -198,6 +218,10 @@ export const SignUpPage: React.FC = () => {
     signup,
   } = useApp();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const rawRedirect = searchParams.get('redirect') || '';
+  const safeRedirect =
+    rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '';
 
   const [form, setForm] = useState({
     name: '',
@@ -212,20 +236,22 @@ export const SignUpPage: React.FC = () => {
     hackerRankHandle: '',
   });
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (currentUser && currentRole !== 'outsider') {
-      navigate(getDashboardPath(currentRole), { replace: true });
+      navigate(safeRedirect || getDashboardPath(currentRole), { replace: true });
     }
-  }, [currentUser, currentRole, navigate]);
+  }, [currentUser, currentRole, navigate, safeRedirect]);
 
   if (needsEmailVerification && unverifiedEmail) {
     return (
       <div className="max-w-xl mx-auto px-4 sm:px-6 py-16 space-y-6">
         <NotificationBanner
           user={firebaseUser}
-          onVerified={(path) => navigate(path, { replace: true })}
+          onVerified={(path) => navigate(safeRedirect || path, { replace: true })}
         />
       </div>
     );
@@ -458,27 +484,57 @@ export const SignUpPage: React.FC = () => {
               <label htmlFor="su-pw" className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1">
                 Password *
               </label>
-              <input
-                id="su-pw"
-                type="password"
-                autoComplete="new-password"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
-              />
+              <div className="relative">
+                <input
+                  id="su-pw"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  className="w-full h-10 pl-3 pr-10 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                  className="absolute inset-y-0 right-0 w-10 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors rounded-r-lg"
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" aria-hidden="true" />
+                  ) : (
+                    <Eye className="w-4 h-4" aria-hidden="true" />
+                  )}
+                </button>
+              </div>
             </div>
             <div>
               <label htmlFor="su-pw2" className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1">
                 Confirm Password *
               </label>
-              <input
-                id="su-pw2"
-                type="password"
-                autoComplete="new-password"
-                value={form.confirmPassword}
-                onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
-                className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
-              />
+              <div className="relative">
+                <input
+                  id="su-pw2"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={form.confirmPassword}
+                  onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
+                  className="w-full h-10 pl-3 pr-10 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword((prev) => !prev)}
+                  aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                  aria-pressed={showConfirmPassword}
+                  className="absolute inset-y-0 right-0 w-10 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors rounded-r-lg"
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff className="w-4 h-4" aria-hidden="true" />
+                  ) : (
+                    <Eye className="w-4 h-4" aria-hidden="true" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 

@@ -37,8 +37,13 @@ import {
 } from 'firebase/firestore';
 import {
   Announcement,
+  CODING_PLATFORMS,
   CampusEvent,
+  CodingActivity,
+  CodingPlatform,
   EmailSendAttempt,
+  EventCheckIn,
+  EventCheckInCode,
   EventRegistration,
   GalleryPhoto,
   INITIAL_SITE_SETTINGS,
@@ -153,8 +158,11 @@ interface AppContextValue {
   resources: LearningResource[];
   gallery: GalleryPhoto[];
   registrations: EventRegistration[];
+  checkInCodes: EventCheckInCode[];
+  eventCheckIns: EventCheckIn[];
   joinRequests: JoinRequest[];
   completedResourceIds: string[];
+  codingActivities: CodingActivity[];
   emailSendAttempts: EmailSendAttempt[];
   refreshEmailSendAttempts: () => Promise<void>;
   deleteEmailSendAttempt: (id: string) => Promise<void>;
@@ -178,10 +186,25 @@ interface AppContextValue {
   approveAnnouncement: (id: string) => Promise<void>;
   rejectAnnouncement: (id: string) => Promise<void>;
 
-  // Actions — Registrations
+  // Actions — Registrations & QR Check-Ins
   registerForEvent: (eventId: string) => Promise<void>;
   cancelRegistration: (eventId: string) => Promise<void>;
   exportRegistrationsCSV: () => void;
+  generateEventCheckInCode: (
+    eventId: string
+  ) => Promise<{ ok: boolean; codeDoc?: EventCheckInCode; error?: string }>;
+  toggleEventCheckInCodeActive: (code: string, isActive: boolean) => Promise<void>;
+  deleteEventCheckInCode: (code: string) => Promise<void>;
+  lookupEventCheckInCode: (
+    rawCode: string
+  ) => Promise<{ ok: boolean; codeDoc?: EventCheckInCode; error?: string }>;
+  checkInAttendeeWithCode: (rawCode: string) => Promise<{
+    ok: boolean;
+    checkIn?: EventCheckIn;
+    alreadyCheckedIn?: boolean;
+    error?: string;
+  }>;
+  exportEventCheckInsCSV: (filterEventId?: string) => void;
 
   // Actions — Leaderboard
   upsertLeaderboardEntry: (entry: Omit<LeaderboardEntry, 'id'> & { id?: string }) => Promise<void>;
@@ -193,6 +216,13 @@ interface AppContextValue {
   addResource: (resource: Omit<LearningResource, 'id'>) => Promise<void>;
   deleteResource: (id: string) => Promise<void>;
   toggleResourceCompleted: (resourceId: string) => Promise<void>;
+  logCodingActivity: (payload: {
+    platform: CodingPlatform;
+    date: string;
+    count: number;
+    title: string;
+  }) => Promise<{ ok: boolean; error?: string }>;
+  deleteCodingActivity: (activityId: string) => Promise<void>;
 
   // Actions — Users, Join Requests & Settings
   updateUserRole: (userId: string, newRole: Exclude<UserRole, 'outsider'>) => Promise<void>;
@@ -510,8 +540,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [resources, setResources] = useState<LearningResource[]>([]);
   const [gallery, setGallery] = useState<GalleryPhoto[]>([]);
   const [registrations, setRegistrations] = useState<EventRegistration[]>([]);
+  const [checkInCodes, setCheckInCodes] = useState<EventCheckInCode[]>([]);
+  const [eventCheckIns, setEventCheckIns] = useState<EventCheckIn[]>([]);
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [completedResourceIds, setCompletedResourceIds] = useState<string[]>([]);
+  const [codingActivities, setCodingActivities] = useState<CodingActivity[]>([]);
   const [emailSendAttempts, setEmailSendAttempts] = useState<EmailSendAttempt[]>([]);
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -702,6 +735,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!fbUser) {
         setFirebaseProfile(null);
         setCompletedResourceIds([]);
+        setCodingActivities([]);
         cleanupRanForUidRef.current = null;
       }
     });
@@ -722,11 +756,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const unverifiedEmail = needsEmailVerification ? firebaseUser?.email || null : null;
 
-  // Listen to verified signed-in user's Firestore profile (/users/{uid}) & progress (/user_progress/{uid})
+  // Listen to verified signed-in user's Firestore profile (/users/{uid}), progress, & coding activities
   useEffect(() => {
     if (!firebaseUser || !isVerifiedAllowedUser) {
       setFirebaseProfile(null);
       setCompletedResourceIds([]);
+      setCodingActivities([]);
       return;
     }
 
@@ -788,9 +823,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     );
 
+    const activitiesQuery = query(
+      collection(db, 'coding_activities'),
+      where('userId', '==', firebaseUser.uid)
+    );
+    const unsubActivities = onSnapshot(
+      activitiesQuery,
+      (snap) => {
+        const mapped: CodingActivity[] = snap.docs
+          .map((d) => {
+            const x = d.data();
+            const rawPlatform = String(x.platform || 'HackerRank') as CodingPlatform;
+            const safePlatform: CodingPlatform = CODING_PLATFORMS.includes(rawPlatform)
+              ? rawPlatform
+              : 'HackerRank';
+            return {
+              id: d.id,
+              userId: String(x.userId || firebaseUser.uid),
+              platform: safePlatform,
+              date: String(x.date || ''),
+              count: Number(x.count || 1),
+              title: String(x.title || ''),
+              createdAt: String(x.createdAt || ''),
+            };
+          })
+          .sort((a, b) => (b.date !== a.date ? b.date.localeCompare(a.date) : b.createdAt.localeCompare(a.createdAt)));
+        setCodingActivities(mapped);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'coding_activities');
+      }
+    );
+
     return () => {
       unsubProfile();
       unsubProgress();
+      unsubActivities();
     };
   }, [firebaseUser, isVerifiedAllowedUser, ensureUserProfile]);
 
@@ -1060,6 +1128,80 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     return () => unsubRegs();
+  }, [authReady, firebaseUser, isVerifiedAllowedUser, isRealCrewOrLead]);
+
+  // Event Check-In Codes (Crew/Lead only list) & Event Check-Ins (Crew/Lead all; verified Member own)
+  useEffect(() => {
+    if (!authReady || !firebaseUser || !isVerifiedAllowedUser) {
+      setCheckInCodes([]);
+      setEventCheckIns([]);
+      return;
+    }
+
+    let unsubCodes: (() => void) | undefined;
+    if (isRealCrewOrLead) {
+      unsubCodes = onSnapshot(
+        collection(db, 'event_checkin_codes'),
+        (snap) => {
+          const loaded = snap.docs
+            .map((d) => {
+              const x = d.data();
+              return {
+                code: String(x.code || d.id),
+                eventId: String(x.eventId || ''),
+                eventTitle: String(x.eventTitle || ''),
+                venue: String(x.venue || ''),
+                isActive: Boolean(x.isActive),
+                createdByUid: String(x.createdByUid || ''),
+                createdByName: String(x.createdByName || ''),
+                createdAt: String(x.createdAt || ''),
+              };
+            })
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+          setCheckInCodes(loaded);
+        },
+        (error) => handleFirestoreError(error, OperationType.LIST, 'event_checkin_codes')
+      );
+    } else {
+      setCheckInCodes([]);
+    }
+
+    const checkInQuery = isRealCrewOrLead
+      ? collection(db, 'event_checkins')
+      : query(collection(db, 'event_checkins'), where('userId', '==', firebaseUser.uid));
+
+    const unsubCheckIns = onSnapshot(
+      checkInQuery,
+      (snap) => {
+        const loaded = snap.docs
+          .map((d) => {
+            const x = d.data();
+            return {
+              id: d.id,
+              checkInCode: String(x.checkInCode || ''),
+              eventId: String(x.eventId || ''),
+              eventTitle: String(x.eventTitle || ''),
+              userId: String(x.userId || ''),
+              userName: String(x.userName || ''),
+              userEmail: String(x.userEmail || ''),
+              collegeEmail: x.collegeEmail ? String(x.collegeEmail) : '',
+              registerNumber: String(x.registerNumber || ''),
+              department: String(x.department || ''),
+              year: String(x.year || ''),
+              phone: x.phone ? String(x.phone) : '',
+              checkedInAt: String(x.checkedInAt || ''),
+            };
+          })
+          .sort((a, b) => b.checkedInAt.localeCompare(a.checkedInAt));
+        setEventCheckIns(loaded);
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'event_checkins')
+    );
+
+    return () => {
+      if (unsubCodes) unsubCodes();
+      unsubCheckIns();
+    };
   }, [authReady, firebaseUser, isVerifiedAllowedUser, isRealCrewOrLead]);
 
   // Lead-only listeners: /users, /join_requests, and /emailSendAttempts
@@ -2264,6 +2406,264 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('CSV exported', `Downloaded ${registrations.length} registration records.`, 'success');
   };
 
+  // ---------------- EVENT QR CHECK-INS ----------------
+  const extractCheckInCode = (rawInput: string): string => {
+    const trimmed = rawInput.trim();
+    if (!trimmed) return '';
+    if (/^https?:\/\//i.test(trimmed) || trimmed.includes('code=')) {
+      try {
+        const parsedUrl = trimmed.startsWith('http')
+          ? new URL(trimmed)
+          : new URL(trimmed, window.location.origin);
+        const param = parsedUrl.searchParams.get('code');
+        if (param) {
+          return param.trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+        }
+      } catch {
+        // Fallback to raw sanitization
+      }
+    }
+    return trimmed.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  };
+
+  const generateEventCheckInCode: AppContextValue['generateEventCheckInCode'] = async (
+    eventId
+  ) => {
+    if (!can('canAccessCrewDashboard') || !firebaseUser || !currentUser) {
+      return { ok: false, error: 'Only Campus Crew or Campus Lead can generate check-in QR codes.' };
+    }
+    const targetEvent = events.find((ev) => ev.id === eventId);
+    if (!targetEvent) {
+      return { ok: false, error: 'Selected event was not found.' };
+    }
+
+    const eventSlug = targetEvent.title
+      .replace(/[^a-zA-Z0-9]+/g, '')
+      .toUpperCase()
+      .slice(0, 6) || 'EVENT';
+    const randomBytes = new Uint8Array(4);
+    crypto.getRandomValues(randomBytes);
+    const randomHex = Array.from(randomBytes)
+      .map((b) => b.toString(16).padStart(2, '0').toUpperCase())
+      .join('');
+    const uniqueCode = sanitizeId(`HRCC-${eventSlug}-${randomHex}`).slice(0, 64);
+
+    const payload: EventCheckInCode = {
+      code: uniqueCode,
+      eventId: sanitizeId(targetEvent.id),
+      eventTitle: ensureMinLen(targetEvent.title, 'Campus Event', 2, 140),
+      venue: ensureMinLen(targetEvent.venue, 'Paavai Campus', 2, 160),
+      isActive: true,
+      createdByUid: sanitizeId(firebaseUser.uid),
+      createdByName: ensureMinLen(currentUser.name, 'Campus Organizer', 2, 100),
+      createdAt: new Date().toISOString(),
+    };
+
+    const path = `event_checkin_codes/${uniqueCode}`;
+    try {
+      await setDoc(doc(db, 'event_checkin_codes', uniqueCode), payload);
+      addToast(
+        'Check-in QR generated',
+        `Unique event ID ${uniqueCode} created for "${targetEvent.title}".`,
+        'success'
+      );
+      return { ok: true, codeDoc: payload };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, path);
+      return { ok: false, error: 'Failed to create event check-in QR code.' };
+    }
+  };
+
+  const toggleEventCheckInCodeActive: AppContextValue['toggleEventCheckInCodeActive'] = async (
+    code,
+    isActive
+  ) => {
+    if (!can('canAccessCrewDashboard') || !firebaseUser) return;
+    const sanitized = extractCheckInCode(code);
+    if (!sanitized) return;
+    const path = `event_checkin_codes/${sanitized}`;
+    try {
+      await updateDoc(doc(db, 'event_checkin_codes', sanitized), { isActive });
+      addToast(
+        isActive ? 'Check-in QR activated' : 'Check-in QR paused',
+        `Event check-in code ${sanitized} is now ${isActive ? 'active' : 'paused'}.`,
+        'info'
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+    }
+  };
+
+  const deleteEventCheckInCode: AppContextValue['deleteEventCheckInCode'] = async (code) => {
+    if (!can('canEditDeleteAnyEvent') || !firebaseUser) return;
+    const sanitized = extractCheckInCode(code);
+    if (!sanitized) return;
+    const path = `event_checkin_codes/${sanitized}`;
+    try {
+      await deleteDoc(doc(db, 'event_checkin_codes', sanitized));
+      addToast('Check-in QR removed', `Deleted event check-in code ${sanitized}.`, 'info');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, path);
+    }
+  };
+
+  const lookupEventCheckInCode: AppContextValue['lookupEventCheckInCode'] = async (rawCode) => {
+    const code = extractCheckInCode(rawCode);
+    if (!code || code.length < 6) {
+      return { ok: false, error: 'Enter or scan a valid unique event check-in ID.' };
+    }
+    const path = `event_checkin_codes/${code}`;
+    try {
+      const snap = await getDoc(doc(db, 'event_checkin_codes', code));
+      if (!snap.exists()) {
+        return { ok: false, error: `No event check-in found for code "${code}".` };
+      }
+      const x = snap.data();
+      const codeDoc: EventCheckInCode = {
+        code: String(x.code || snap.id),
+        eventId: String(x.eventId || ''),
+        eventTitle: String(x.eventTitle || ''),
+        venue: String(x.venue || ''),
+        isActive: Boolean(x.isActive),
+        createdByUid: String(x.createdByUid || ''),
+        createdByName: String(x.createdByName || ''),
+        createdAt: String(x.createdAt || ''),
+      };
+      return { ok: true, codeDoc };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.GET, path);
+      return { ok: false, error: 'Could not verify the event check-in QR code.' };
+    }
+  };
+
+  const checkInAttendeeWithCode: AppContextValue['checkInAttendeeWithCode'] = async (rawCode) => {
+    if (!currentUser || !firebaseUser) {
+      return {
+        ok: false,
+        error: 'Please sign in with your verified student account to complete event check-in.',
+      };
+    }
+
+    const lookup = await lookupEventCheckInCode(rawCode);
+    if (!lookup.ok || !lookup.codeDoc) {
+      return { ok: false, error: lookup.error || 'Invalid event check-in QR code.' };
+    }
+    const codeDoc = lookup.codeDoc;
+    if (!codeDoc.isActive) {
+      return {
+        ok: false,
+        error: `Check-in code ${codeDoc.code} has been paused by the event organizer.`,
+      };
+    }
+
+    const checkInId = sanitizeId(`${codeDoc.code}_${firebaseUser.uid}`);
+    const path = `event_checkins/${checkInId}`;
+
+    try {
+      const existingSnap = await getDoc(doc(db, 'event_checkins', checkInId));
+      if (existingSnap.exists()) {
+        const x = existingSnap.data();
+        return {
+          ok: true,
+          alreadyCheckedIn: true,
+          checkIn: {
+            id: existingSnap.id,
+            checkInCode: String(x.checkInCode || codeDoc.code),
+            eventId: String(x.eventId || codeDoc.eventId),
+            eventTitle: String(x.eventTitle || codeDoc.eventTitle),
+            userId: String(x.userId || firebaseUser.uid),
+            userName: String(x.userName || currentUser.name),
+            userEmail: String(x.userEmail || currentUser.email),
+            collegeEmail: x.collegeEmail ? String(x.collegeEmail) : '',
+            registerNumber: String(x.registerNumber || currentUser.regNo),
+            department: String(x.department || currentUser.department),
+            year: String(x.year || currentUser.year),
+            phone: x.phone ? String(x.phone) : '',
+            checkedInAt: String(x.checkedInAt || ''),
+          },
+        };
+      }
+
+      const payload = {
+        checkInCode: codeDoc.code,
+        eventId: sanitizeId(codeDoc.eventId),
+        eventTitle: ensureMinLen(codeDoc.eventTitle, 'Campus Event', 2, 140),
+        userId: sanitizeId(firebaseUser.uid),
+        userName: ensureMinLen(currentUser.name, 'Paavai Student', 2, 100),
+        userEmail: clampStr(currentUser.email, 160),
+        collegeEmail: currentUser.collegeEmail ? clampStr(currentUser.collegeEmail, 160) : '',
+        registerNumber: ensureMinLen(
+          (currentUser.regNo || 'PEC-MEMBER').replace(/[^A-Za-z0-9-]/g, ''),
+          'PEC-MEMBER',
+          4,
+          20
+        ),
+        department: ensureMinLen(currentUser.department || 'CSE', 'CSE', 2, 40),
+        year: ensureMinLen(currentUser.year || '1st Year', '1st Year', 2, 20),
+        phone: clampStr(currentUser.phone || '', 20),
+        checkedInAt: new Date().toISOString(),
+      };
+
+      await setDoc(doc(db, 'event_checkins', checkInId), payload);
+      addToast('Check-in recorded', `Checked into "${codeDoc.eventTitle}".`, 'success');
+      return {
+        ok: true,
+        alreadyCheckedIn: false,
+        checkIn: { id: checkInId, ...payload },
+      };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, path);
+      return { ok: false, error: 'Failed to store check-in details in Firestore.' };
+    }
+  };
+
+  const exportEventCheckInsCSV: AppContextValue['exportEventCheckInsCSV'] = (filterEventId) => {
+    if (!can('canExportRegistrations')) {
+      addToast('Export restricted', 'Only the Campus Lead can export check-in attendance.', 'error');
+      return;
+    }
+    const rowsToExport = filterEventId
+      ? eventCheckIns.filter((c) => c.eventId === filterEventId)
+      : eventCheckIns;
+    const headers = [
+      'Check-In ID',
+      'QR Event Code',
+      'Event Title',
+      'Student Name',
+      'Register Number',
+      'Department',
+      'Year',
+      'Personal Email',
+      'College Email',
+      'Phone',
+      'Checked In At',
+    ];
+    const rows = rowsToExport.map((c) =>
+      [
+        c.id,
+        c.checkInCode,
+        `"${c.eventTitle.replace(/"/g, '""')}"`,
+        `"${c.userName.replace(/"/g, '""')}"`,
+        c.registerNumber,
+        c.department,
+        c.year,
+        c.userEmail,
+        c.collegeEmail || '',
+        c.phone || '',
+        c.checkedInAt,
+      ].join(',')
+    );
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `hrcc-paavai-checkins-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    addToast('CSV exported', `Downloaded ${rowsToExport.length} attendee check-in records.`, 'success');
+  };
+
   // ---------------- LEADERBOARD CRUD ----------------
   const upsertLeaderboardEntry: AppContextValue['upsertLeaderboardEntry'] = async (entry) => {
     if (!can('canUpdateLeaderboard') || !firebaseUser) return;
@@ -2369,7 +2769,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addToast('Sign in to track progress', 'Log in to save completed modules.', 'info');
       return;
     }
-    const next = completedResourceIds.includes(resourceId)
+    const wasCompleted = completedResourceIds.includes(resourceId);
+    const next = wasCompleted
       ? completedResourceIds.filter((id) => id !== resourceId)
       : [...completedResourceIds, resourceId];
 
@@ -2401,8 +2802,85 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         completedRoadmapCount: sliced.length,
         updatedAt: nowISO,
       });
+
+      if (!wasCompleted) {
+        const matched = resources.find((r) => r.id === resourceId);
+        const now = new Date();
+        const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const actId = sanitizeId(`act_rm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`);
+        await setDoc(doc(db, 'coding_activities', actId), {
+          userId: sanitizeId(firebaseUser.uid),
+          platform: 'DSA Roadmap',
+          date: localDate,
+          count: 1,
+          title: ensureMinLen(
+            matched ? `Completed: ${matched.title}` : 'Completed roadmap module',
+            'Completed roadmap module',
+            2,
+            140
+          ),
+          createdAt: nowISO,
+        }).catch(() => {});
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  };
+
+  const logCodingActivity: AppContextValue['logCodingActivity'] = async (payload) => {
+    if (!currentUser || !firebaseUser || !isVerifiedAllowedUser) {
+      const msg = 'Sign in with a verified account to log coding activity.';
+      addToast('Sign in required', msg, 'error');
+      return { ok: false, error: msg };
+    }
+    const safePlatform: CodingPlatform = CODING_PLATFORMS.includes(payload.platform)
+      ? payload.platform
+      : 'HackerRank';
+    const trimmedDate = payload.date.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmedDate)) {
+      return { ok: false, error: 'Select a valid YYYY-MM-DD date.' };
+    }
+    const numericCount = Math.floor(Number(payload.count));
+    if (!Number.isFinite(numericCount) || numericCount < 1 || numericCount > 500) {
+      return { ok: false, error: 'Completion count must be between 1 and 500.' };
+    }
+    const cleanedTitle = clampStr(payload.title, 140);
+    if (cleanedTitle.length < 2) {
+      return { ok: false, error: 'Enter an activity title (at least 2 characters).' };
+    }
+
+    const actId = sanitizeId(`act_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+    const path = `coding_activities/${actId}`;
+    try {
+      await setDoc(doc(db, 'coding_activities', actId), {
+        userId: sanitizeId(firebaseUser.uid),
+        platform: safePlatform,
+        date: trimmedDate,
+        count: numericCount,
+        title: cleanedTitle,
+        createdAt: new Date().toISOString(),
+      });
+      addToast(
+        'Activity logged',
+        `${numericCount} ${safePlatform} completion${numericCount === 1 ? '' : 's'} recorded for ${trimmedDate}.`,
+        'success'
+      );
+      return { ok: true };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, path);
+      return { ok: false, error: 'Could not save coding activity to Firestore.' };
+    }
+  };
+
+  const deleteCodingActivity: AppContextValue['deleteCodingActivity'] = async (activityId) => {
+    if (!currentUser || !firebaseUser) return;
+    const sanitized = sanitizeId(activityId);
+    const path = `coding_activities/${sanitized}`;
+    try {
+      await deleteDoc(doc(db, 'coding_activities', sanitized));
+      addToast('Activity removed', 'Removed entry from your coding heatmap.', 'info');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, path);
     }
   };
 
@@ -2814,8 +3292,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         resources,
         gallery,
         registrations,
+        checkInCodes,
+        eventCheckIns,
         joinRequests,
         completedResourceIds,
+        codingActivities,
         emailSendAttempts,
         refreshEmailSendAttempts,
         deleteEmailSendAttempt,
@@ -2831,6 +3312,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         registerForEvent,
         cancelRegistration,
         exportRegistrationsCSV,
+        generateEventCheckInCode,
+        toggleEventCheckInCodeActive,
+        deleteEventCheckInCode,
+        lookupEventCheckInCode,
+        checkInAttendeeWithCode,
+        exportEventCheckInsCSV,
         upsertLeaderboardEntry,
         deleteLeaderboardEntry,
         addGalleryPhoto,
@@ -2838,6 +3325,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addResource,
         deleteResource,
         toggleResourceCompleted,
+        logCodingActivity,
+        deleteCodingActivity,
         updateUserRole,
         deleteUser,
         submitJoinRequest,

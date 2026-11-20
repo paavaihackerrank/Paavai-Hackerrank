@@ -6,6 +6,7 @@ import { CHAPTER_IMAGES } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 import { SafeImage } from '../components/SafeImage';
 import { MemberSpotlight } from '../components/MemberSpotlight';
+import { UpcomingEventsTicker } from '../components/UpcomingEventsTicker';
 
 export const HomePage: React.FC = () => {
   const {
@@ -58,6 +59,9 @@ export const HomePage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Real-Time Upcoming Events Countdown Ticker */}
+      <UpcomingEventsTicker />
 
       {/* Hero Section */}
       <section className="relative overflow-hidden bg-tech-grid border-b border-slate-200 dark:border-slate-800/80">

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Calendar, CheckCircle2, Clock, Lock, MapPin, Users } from 'lucide-react';
+import { Calendar, CheckCircle2, Clock, Lock, MapPin, QrCode, Users } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { SafeImage } from '../components/SafeImage';
 
@@ -67,29 +67,39 @@ export const EventsPage: React.FC = () => {
           </p>
         </div>
 
-        {/* Segmented Filter Control */}
-        <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-200/70 dark:bg-[#121821] border border-slate-200 dark:border-slate-800 self-start md:self-auto">
-          {(
-            [
-              ['all', 'All Events'],
-              ['upcoming', 'Upcoming'],
-              ['members', 'Members Only'],
-              ['past', 'Past'],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setFilter(key)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                filter === key
-                  ? 'bg-white dark:bg-[#1B2432] text-slate-900 dark:text-white shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
+          <Link
+            to="/checkin"
+            className="px-3.5 py-2 rounded-lg text-xs font-mono font-semibold border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#121821] text-slate-800 dark:text-slate-100 hover:border-[#00EA64] transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+          >
+            <QrCode className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
+            <span>QR Check-In</span>
+          </Link>
+
+          {/* Segmented Filter Control */}
+          <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-200/70 dark:bg-[#121821] border border-slate-200 dark:border-slate-800">
+            {(
+              [
+                ['all', 'All Events'],
+                ['upcoming', 'Upcoming'],
+                ['members', 'Members Only'],
+                ['past', 'Past'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setFilter(key)}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  filter === key
+                    ? 'bg-white dark:bg-[#1B2432] text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 

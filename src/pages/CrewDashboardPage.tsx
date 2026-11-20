@@ -20,10 +20,12 @@ import {
 import { useApp } from '../context/AppContext';
 
 import { MemberDirectoryPanel, JoinRequestsPanel, SiteSettingsPanel } from './AdminPanelPage';
+import { EventCheckInQRGenerator } from '../components/EventCheckInQRGenerator';
 
 type DashboardTab =
   | 'members'
   | 'events'
+  | 'checkins'
   | 'announcements'
   | 'gallery'
   | 'resources'
@@ -44,6 +46,7 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
     resources,
     leaderboard,
     registrations,
+    eventCheckIns,
     joinRequests,
     createEvent,
     updateEvent,
@@ -118,6 +121,7 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
   const tabs: Array<{ id: DashboardTab; label: string; badge?: number }> = [
     ...(isLead ? [{ id: 'members' as const, label: 'Member Management', badge: users.length }] : []),
     { id: 'events', label: 'Events' },
+    { id: 'checkins', label: 'QR Check-Ins', badge: eventCheckIns.length },
     { id: 'announcements', label: 'Announcements' },
     { id: 'gallery', label: 'Gallery' },
     { id: 'resources', label: 'Resources' },
@@ -1149,6 +1153,9 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
           </div>
         </div>
       )}
+
+      {/* TAB: QR CHECK-INS (Crew & Lead) */}
+      {activeTab === 'checkins' && <EventCheckInQRGenerator />}
 
       {/* TAB 7: PENDING APPROVALS (Campus Lead ONLY) */}
       {activeTab === 'approvals' && isLead && (
