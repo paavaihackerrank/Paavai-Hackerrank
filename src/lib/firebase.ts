@@ -10,23 +10,27 @@ const firebaseConfig = {
   projectId: firebaseAppletConfig.projectId,
   storageBucket: firebaseAppletConfig.storageBucket,
   messagingSenderId: firebaseAppletConfig.messagingSenderId,
-  appId: '1:1092012102921:web:05a4e0048f918b2aab2fd8',
-  measurementId: 'G-GRGRG17RSK',
+  appId: firebaseAppletConfig.appId,
+  ...(firebaseAppletConfig.measurementId
+    ? { measurementId: firebaseAppletConfig.measurementId }
+    : {}),
 };
 
 const app = initializeApp(firebaseConfig);
 
-// Initialize Analytics only when supported by the browser/iframe environment
+// Initialize Analytics only when a measurementId is configured and supported
 export let analytics: ReturnType<typeof getAnalytics> | null = null;
-isSupported()
-  .then((supported) => {
-    if (supported) {
-      analytics = getAnalytics(app);
-    }
-  })
-  .catch(() => {
-    // Ignore analytics initialization errors in restricted contexts
-  });
+if (firebaseAppletConfig.measurementId) {
+  isSupported()
+    .then((supported) => {
+      if (supported) {
+        analytics = getAnalytics(app);
+      }
+    })
+    .catch(() => {
+      // Ignore analytics initialization errors in restricted contexts
+    });
+}
 
 // CRITICAL: Pass firestoreDatabaseId so queries hit the provisioned Firestore database.
 export const db = getFirestore(app, firebaseAppletConfig.firestoreDatabaseId);
@@ -34,10 +38,7 @@ export const auth = getAuth(app);
 
 export const CAMPUS_LEAD_EMAIL = '622123104144@paavai.edu.in';
 export const BOOTSTRAPPED_ADMIN_EMAIL = CAMPUS_LEAD_EMAIL;
-export const BOOTSTRAPPED_ADMIN_EMAILS = [
-  CAMPUS_LEAD_EMAIL,
-  'paavaihackerrank@gmail.com',
-] as const;
+export const BOOTSTRAPPED_ADMIN_EMAILS = [CAMPUS_LEAD_EMAIL] as const;
 
 export function isBootstrappedAdminEmail(email?: string | null): boolean {
   const lower = (email || '').trim().toLowerCase();

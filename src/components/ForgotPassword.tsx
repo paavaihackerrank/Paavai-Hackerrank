@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowLeft, KeyRound, MailCheck } from 'lucide-react';
-import { isAllowedCollegeEmail, useApp } from '../context/AppContext';
+import { isValidAccountEmail, useApp } from '../context/AppContext';
 
 interface ForgotPasswordProps {
   initialEmail?: string;
@@ -24,8 +24,8 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const targetEmail = resetEmail.trim();
-    if (!targetEmail || !isAllowedCollegeEmail(targetEmail)) {
-      setError('Enter your registered @paavai.edu.in email address.');
+    if (!targetEmail || !isValidAccountEmail(targetEmail)) {
+      setError('Enter your registered personal email address.');
       setSuccessMessage('');
       return;
     }
@@ -57,7 +57,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({
             Forgot Password
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            Enter your registered <strong>@paavai.edu.in</strong> email and Firebase will send a
+            Enter your registered <strong>personal email</strong> and Firebase will send a
             secure password reset link to recover your account access.
           </p>
         </div>
@@ -82,7 +82,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({
             <span>{successMessage}</span>
           </div>
           <p className="text-[11px] text-slate-600 dark:text-slate-300 pl-6">
-            Didn&apos;t receive it after 2 minutes? Check Spam/Quarantine, and confirm this account
+            Didn&apos;t receive it after 2 minutes? Check Spam/Promotions, and confirm this account
             is registered in Firebase Authentication with the Email/Password provider enabled.
           </p>
         </div>
@@ -94,7 +94,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({
             htmlFor="forgot-password-email"
             className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1.5"
           >
-            Registered Paavai Email
+            Registered Personal Email
           </label>
           <input
             id="forgot-password-email"
@@ -102,7 +102,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({
             autoComplete="email"
             value={resetEmail}
             onChange={(e) => setResetEmail(e.target.value)}
-            placeholder="student@paavai.edu.in"
+            placeholder="you@gmail.com"
             className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
           />
         </div>

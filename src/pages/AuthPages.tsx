@@ -2,7 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { MailCheck } from 'lucide-react';
 import { ACADEMIC_YEARS, DEPARTMENTS, getDashboardPath } from '../config/rbacAndData';
-import { isAllowedCollegeEmail, useApp } from '../context/AppContext';
+import {
+  isCollegeEmailId,
+  isInstitutionalEmail,
+  isPersonalEmail,
+  isValidAccountEmail,
+  isValidPhoneNumber,
+  useApp,
+} from '../context/AppContext';
 import { NotificationBanner } from '../components/NotificationBanner';
 import { ForgotPassword } from '../components/ForgotPassword';
 
@@ -35,8 +42,8 @@ export const LoginPage: React.FC = () => {
       setError('Enter both email and password.');
       return;
     }
-    if (!isAllowedCollegeEmail(email)) {
-      setError('Sign in requires an official @paavai.edu.in email address.');
+    if (!isValidAccountEmail(email)) {
+      setError('Enter a valid registered email address.');
       return;
     }
     setSubmitting(true);
@@ -71,9 +78,9 @@ export const LoginPage: React.FC = () => {
               Email Verification Required to Activate Account
             </p>
             <p className="text-slate-700 dark:text-slate-300">
-              Signed up recently? Check your <strong>@paavai.edu.in</strong> inbox for a
-              verification link to activate your account. Unverified accounts are automatically
-              deleted after <strong>12 hours</strong>.
+              Signed up recently? Check your <strong>registered personal email</strong> inbox
+              (including Spam/Promotions) for a verification link to activate your account.
+              Unverified accounts are automatically deleted after <strong>12 hours</strong>.
             </p>
           </div>
         </div>
@@ -89,7 +96,7 @@ export const LoginPage: React.FC = () => {
           </h1>
           {!resetMode && (
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Sign in with your verified <strong>@paavai.edu.in</strong> college email to open your
+              Sign in with your verified <strong>personal email</strong> and password to open your
               dashboard immediately.
             </p>
           )}
@@ -119,7 +126,7 @@ export const LoginPage: React.FC = () => {
                 htmlFor="login-email"
                 className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1.5"
               >
-                Paavai College Email
+                Personal Email
               </label>
               <input
                 id="login-email"
@@ -127,7 +134,7 @@ export const LoginPage: React.FC = () => {
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="student@paavai.edu.in"
+                placeholder="you@gmail.com"
                 className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
               />
             </div>
@@ -165,7 +172,7 @@ export const LoginPage: React.FC = () => {
               disabled={submitting}
               className="w-full py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60"
             >
-              {submitting ? 'Signing in...' : 'Sign in with Email'}
+              {submitting ? 'Signing in...' : 'Sign in with Personal Email'}
             </button>
           </form>
         )}
@@ -195,6 +202,7 @@ export const SignUpPage: React.FC = () => {
   const [form, setForm] = useState({
     name: '',
     email: '',
+    collegeEmail: '',
     password: '',
     confirmPassword: '',
     regNo: '',
@@ -229,12 +237,26 @@ export const SignUpPage: React.FC = () => {
       setError('Enter your full name.');
       return;
     }
-    if (!isAllowedCollegeEmail(form.email)) {
-      setError('Please sign up using your official @paavai.edu.in email address.');
+    if (!isValidAccountEmail(form.email)) {
+      setError('Enter a valid personal email address (used for login and verification).');
+      return;
+    }
+    if (isInstitutionalEmail(form.email) || !isPersonalEmail(form.email)) {
+      setError(
+        'Institutional emails (@paavai.edu.in / .edu.in) cannot be used as your login email. Please enter a personal email address (e.g. @gmail.com, @outlook.com).'
+      );
+      return;
+    }
+    if (!isCollegeEmailId(form.collegeEmail)) {
+      setError('Enter your unique @paavai.edu.in college email ID.');
       return;
     }
     if (!/^[A-Za-z0-9\-]{4,20}$/.test(form.regNo.trim())) {
       setError('Enter a valid Paavai register number (4–20 alphanumeric characters).');
+      return;
+    }
+    if (!isValidPhoneNumber(form.phone)) {
+      setError('Enter a valid 10-digit unique phone number.');
       return;
     }
     if (form.password.length < 6) {
@@ -251,6 +273,7 @@ export const SignUpPage: React.FC = () => {
     const res = await signup({
       name: form.name,
       email: form.email,
+      collegeEmail: form.collegeEmail,
       password: form.password,
       regNo: form.regNo,
       department: form.department,
@@ -280,9 +303,10 @@ export const SignUpPage: React.FC = () => {
             Create Student Member Account
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Verify your <strong>@paavai.edu.in</strong> email to receive immediate{' '}
-            <strong>Student Community Member</strong> access by default—no manual approval
-            required.
+            Register with your <strong>personal email &amp; password</strong>, plus your unique{' '}
+            <strong>@paavai.edu.in college email ID</strong> and unique{' '}
+            <strong>phone number</strong>. Verify your personal email to receive immediate{' '}
+            <strong>Student Community Member</strong> access.
           </p>
         </div>
 
@@ -364,20 +388,24 @@ export const SignUpPage: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div>
               <label htmlFor="su-email" className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1">
-                Paavai College Email *
+                Personal Email *
               </label>
               <input
                 id="su-email"
                 type="email"
+                autoComplete="email"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
-                placeholder="you@paavai.edu.in"
+                placeholder="you@gmail.com"
                 className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
               />
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                Personal email only (not @paavai.edu.in) — used for login &amp; verification
+              </p>
             </div>
             <div>
               <label htmlFor="su-phone" className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1">
-                Phone
+                Phone Number * (Unique)
               </label>
               <input
                 id="su-phone"
@@ -387,21 +415,42 @@ export const SignUpPage: React.FC = () => {
                 placeholder="+91 98765 43210"
                 className="w-full h-10 px-3 rounded-lg text-sm font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
               />
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                Must not match an existing member
+              </p>
             </div>
           </div>
 
-          <div>
-            <label htmlFor="su-handle" className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1">
-              HackerRank Handle (optional)
-            </label>
-            <input
-              id="su-handle"
-              type="text"
-              value={form.hackerRankHandle}
-              onChange={(e) => setForm({ ...form, hackerRankHandle: e.target.value })}
-              placeholder="@your_handle"
-              className="w-full h-10 px-3 rounded-lg text-sm font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label htmlFor="su-college-email" className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1">
+                College Email ID * (Unique)
+              </label>
+              <input
+                id="su-college-email"
+                type="email"
+                value={form.collegeEmail}
+                onChange={(e) => setForm({ ...form, collegeEmail: e.target.value })}
+                placeholder="622126104015@paavai.edu.in"
+                className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+              />
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                Official @paavai.edu.in ID (1 per student)
+              </p>
+            </div>
+            <div>
+              <label htmlFor="su-handle" className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1">
+                HackerRank Handle (optional)
+              </label>
+              <input
+                id="su-handle"
+                type="text"
+                value={form.hackerRankHandle}
+                onChange={(e) => setForm({ ...form, hackerRankHandle: e.target.value })}
+                placeholder="@your_handle"
+                className="w-full h-10 px-3 rounded-lg text-sm font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -412,6 +461,7 @@ export const SignUpPage: React.FC = () => {
               <input
                 id="su-pw"
                 type="password"
+                autoComplete="new-password"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                 className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
@@ -424,6 +474,7 @@ export const SignUpPage: React.FC = () => {
               <input
                 id="su-pw2"
                 type="password"
+                autoComplete="new-password"
                 value={form.confirmPassword}
                 onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
                 className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
@@ -436,7 +487,7 @@ export const SignUpPage: React.FC = () => {
             disabled={submitting}
             className="w-full py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors disabled:opacity-60"
           >
-            {submitting ? 'Creating Account...' : 'Sign Up with @paavai.edu.in Email'}
+            {submitting ? 'Creating Account...' : 'Sign Up with Personal Email'}
           </button>
         </form>
 

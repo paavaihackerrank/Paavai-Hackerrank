@@ -96,13 +96,18 @@ export const ProfilePage: React.FC = () => {
 
       <header className="space-y-2 border-b border-slate-200 dark:border-slate-800 pb-6">
         <p className="font-mono text-xs font-semibold text-[#009942] dark:text-[#00EA64]">
-          {ROLE_META[currentUser.role].label} · Verified @paavai.edu.in
+          {ROLE_META[currentUser.role].label} · Verified Member
         </p>
         <h1 className="font-mono text-3xl font-bold text-slate-900 dark:text-white">
           {currentUser.name}
         </h1>
         <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
-          {currentUser.email} · Reg No. {currentUser.regNo} · Joined {currentUser.joinedAt}
+          {currentUser.email}
+          {currentUser.collegeEmail &&
+          currentUser.collegeEmail.toLowerCase() !== currentUser.email.toLowerCase()
+            ? ` · College ID: ${currentUser.collegeEmail}`
+            : ''}{' '}
+          · Reg No. {currentUser.regNo} · Joined {currentUser.joinedAt}
         </p>
       </header>
 

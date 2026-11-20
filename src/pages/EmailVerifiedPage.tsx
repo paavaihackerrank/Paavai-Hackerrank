@@ -36,8 +36,8 @@ export const EmailVerifiedPage: React.FC = () => {
             ) : (
               <>
                 Your email verification is confirmed. Sign in with your{' '}
-                <strong>@paavai.edu.in</strong> credentials to open your member dashboard and start
-                practicing.
+                <strong>registered personal email &amp; password</strong> to open your member
+                dashboard and start practicing.
               </>
             )}
           </p>

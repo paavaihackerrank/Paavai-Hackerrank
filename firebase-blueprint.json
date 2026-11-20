@@ -7,6 +7,7 @@
       "properties": {
         "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "email": { "type": "string", "format": "email", "minLength": 5, "maxLength": 160 },
+        "collegeEmail": { "type": "string", "format": "email", "minLength": 0, "maxLength": 160 },
         "name": { "type": "string", "minLength": 2, "maxLength": 100 },
         "regNo": { "type": "string", "minLength": 4, "maxLength": 20, "pattern": "^[A-Za-z0-9\\-]+$" },
         "department": { "type": "string", "minLength": 2, "maxLength": 40 },
@@ -223,6 +224,16 @@
         "attemptedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["type", "email", "status", "attemptedAt"]
+    },
+    "UniqueIndexLock": {
+      "title": "UniqueIndexLock",
+      "description": "SHA-256 hash-keyed uniqueness lock preventing duplicate phone numbers or college email IDs without exposing PII.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "createdAt"]
     }
   },
   "firestore": {
@@ -252,7 +263,7 @@
     },
     "/resources/{resourceId}": {
       "schema": { "$ref": "#/entities/LearningResource" },
-      "description": "Learning roadmap tracks; basic modules public, full modules require verified @paavai.edu.in sign-in."
+      "description": "Learning roadmap tracks; basic modules public, full modules require verified member sign-in."
     },
     "/gallery/{photoId}": {
       "schema": { "$ref": "#/entities/GalleryPhoto" },
@@ -277,6 +288,18 @@
     "/emailSendAttempts/{attemptId}": {
       "schema": { "$ref": "#/entities/EmailSendAttempt" },
       "description": "Immutable delivery audit logs for password reset and verification emails; strictly Campus Lead-only readable."
+    },
+    "/unique_emails/{emailHash}": {
+      "schema": { "$ref": "#/entities/UniqueIndexLock" },
+      "description": "Hash-keyed uniqueness locks for personal login emails (single-doc get allowed, list denied)."
+    },
+    "/unique_phones/{phoneHash}": {
+      "schema": { "$ref": "#/entities/UniqueIndexLock" },
+      "description": "Hash-keyed uniqueness locks for student phone numbers (single-doc get allowed, list denied)."
+    },
+    "/unique_college_emails/{emailHash}": {
+      "schema": { "$ref": "#/entities/UniqueIndexLock" },
+      "description": "Hash-keyed uniqueness locks for Paavai college email IDs (single-doc get allowed, list denied)."
     }
   }
 }

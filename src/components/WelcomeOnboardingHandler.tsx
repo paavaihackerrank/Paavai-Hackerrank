@@ -76,7 +76,7 @@ export const WelcomeOnboardingHandler: React.FC = () => {
 
         addToast(
           'Welcome to HackerRank Campus Crew!',
-          'Your @paavai.edu.in email is verified and your account is now active.',
+          'Your email is verified and your account is now active.',
           'success'
         );
         setModal({
@@ -105,7 +105,7 @@ export const WelcomeOnboardingHandler: React.FC = () => {
       if (firebaseUser && !syncRes.verified) {
         addToast(
           'Email verification still pending',
-          'Please click the verification link in your @paavai.edu.in inbox first.',
+          'Please click the verification link in your registered email inbox first.',
           'info'
         );
         return;
@@ -233,7 +233,7 @@ export const WelcomeOnboardingHandler: React.FC = () => {
             </div>
 
             <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-              Your <strong>@paavai.edu.in</strong> email has been verified. You now have full
+              Your registered email has been verified. You now have full
               access to the HackerRank Campus Crew portal at Paavai Engineering College
               {resolvedRole ? ` as a ${ROLE_META[resolvedRole].label}` : ''}.
             </p>

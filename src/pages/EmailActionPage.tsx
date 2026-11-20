@@ -59,7 +59,7 @@ export const EmailActionPage: React.FC = () => {
         }
         addToast(
           'Welcome to HackerRank Campus Crew!',
-          'Your @paavai.edu.in email is now verified.',
+          'Your email address is now verified.',
           'success'
         );
         navigate('/verified?verified=true', { replace: true });

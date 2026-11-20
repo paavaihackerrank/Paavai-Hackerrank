@@ -73,7 +73,7 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
     return null;
   }
 
-  const email = targetEmail || 'your @paavai.edu.in email';
+  const email = targetEmail || 'your registered email';
   const busy = checking || resending;
   const isCoolingDown = cooldownSeconds > 0;
   const cooldownProgress = Math.min(
@@ -103,6 +103,12 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
     setMessage('');
     const res = await resendVerificationEmail();
     setResending(false);
+    if (res.alreadyVerified) {
+      if (onVerified) {
+        onVerified('/dashboard/member');
+      }
+      return;
+    }
     if (!res.ok) {
       syncCooldown();
       setError(res.error || 'Could not resend verification email.');
@@ -110,7 +116,15 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
     }
     setResendCooldownTimestamp(targetEmail, COOLDOWN_SECONDS * 1000);
     setCooldownSeconds(COOLDOWN_SECONDS);
-    setMessage(`A fresh verification link has been sent to ${email}. Please check your inbox.`);
+    setMessage(
+      `Firebase Auth accepted the verification email request for ${email}${
+        res.dispatchedAt ? ` at ${res.dispatchedAt}` : ''
+      }.${
+        res.fallbackWarning
+          ? ` Note: ${res.fallbackWarning}`
+          : ''
+      } Please check your Inbox, Spam, or Promotions folder.`
+    );
   };
 
   return (
@@ -134,8 +148,8 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
           </h2>
           <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
             Your account (<strong className="font-mono">{email}</strong>) is not activated yet.
-            Please check your inbox (including Spam/Promotions) for the verification link to
-            activate your account. Unverified accounts are automatically deleted after{' '}
+            Please check your inbox (including Spam/Promotions/Quarantine) for the verification link
+            to activate your account. Unverified accounts are automatically deleted after{' '}
             <strong>12 hours</strong>.
           </p>
         </div>
@@ -144,14 +158,14 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({
       {error && (
         <div
           role="alert"
-          className="p-3 rounded-lg text-xs font-medium bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400"
+          className="p-3 rounded-lg text-xs font-medium bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 leading-relaxed"
         >
           {error}
         </div>
       )}
 
       {message && (
-        <div className="p-3 rounded-lg text-xs font-medium bg-[#00EA64]/10 border border-[#00EA64]/30 text-[#009942] dark:text-[#00EA64]">
+        <div className="p-3 rounded-lg text-xs font-medium bg-[#00EA64]/10 border border-[#00EA64]/30 text-[#009942] dark:text-[#00EA64] leading-relaxed">
           {message}
         </div>
       )}

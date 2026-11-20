@@ -25,25 +25,21 @@ service cloud.firestore {
       return request.auth != null
         && request.auth.token.email_verified == true
         && request.auth.token.email is string
-        && request.auth.token.email.lower() in ['622123104144@paavai.edu.in', 'paavaihackerrank@gmail.com'];
+        && request.auth.token.email.lower() == '622123104144@paavai.edu.in';
     }
 
-    function isPaavaiEmail() {
-      return request.auth.token.email is string
-        && request.auth.token.email.lower().matches('^[a-z0-9._%+\\-]+@paavai\\.edu\\.in$');
-    }
-
-    function hasAllowedCollegeAuth() {
+    function hasAuthenticatedSession() {
       return request.auth != null
         && request.auth.token.email is string
-        && (isPaavaiEmail() || isBootstrappedAdmin());
+        && isValidEmail(request.auth.token.email);
     }
 
-    // signedIn() requires a verified @paavai.edu.in email (or bootstrapped Campus Lead)
+    // signedIn() requires a verified personal or institutional email (or bootstrapped Campus Lead)
     function signedIn() {
       return request.auth != null
         && request.auth.token.email_verified == true
-        && (isPaavaiEmail() || isBootstrappedAdmin());
+        && request.auth.token.email is string
+        && isValidEmail(request.auth.token.email);
     }
 
     function isOwner(userId) {
@@ -93,9 +89,10 @@ service cloud.firestore {
     // ------------------------------------------------------------------------
     function isValidUserProfile(data) {
       return data.keys().hasAll(['uid', 'email', 'name', 'regNo', 'department', 'year', 'role'])
-        && data.keys().hasOnly(['uid', 'email', 'name', 'regNo', 'department', 'year', 'role', 'emailVerified', 'phone', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'joinedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'collegeEmail', 'name', 'regNo', 'department', 'year', 'role', 'emailVerified', 'phone', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'joinedAt', 'createdAt', 'updatedAt'])
         && isValidId(data.uid)
         && isValidEmail(data.email)
+        && (!('collegeEmail' in data) || data.collegeEmail == '' || isValidEmail(data.collegeEmail))
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 100
         && isValidRegNo(data.regNo)
         && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
@@ -253,15 +250,22 @@ service cloud.firestore {
         && (!('updatedAt' in data) || isValidTimestampStr(data.updatedAt));
     }
 
+    function isValidSha256Hex(id) {
+      return id is string && id.size() == 64 && id.matches('^[a-f0-9]{64}$');
+    }
+
+    function isValidUniqueLock(data) {
+      return data.keys().hasAll(['uid', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'createdAt'])
+        && isValidId(data.uid)
+        && isValidTimestampStr(data.createdAt);
+    }
+
     function isValidEmailSendAttempt(data) {
       return data.keys().hasAll(['type', 'email', 'status', 'attemptedAt'])
         && data.keys().hasOnly(['type', 'email', 'status', 'errorCode', 'errorMessage', 'continueUrl', 'actorUid', 'attemptedAt'])
         && data.type in ['verification', 'password_reset']
         && isValidEmail(data.email)
-        && (
-          data.email.lower().matches('^[a-z0-9._%+\\-]+@paavai\\.edu\\.in$') ||
-          data.email.lower() in ['622123104144@paavai.edu.in', 'paavaihackerrank@gmail.com']
-        )
         && data.status in ['sent', 'failed']
         && (!('errorCode' in data) || (data.errorCode is string && data.errorCode.size() <= 160))
         && (!('errorMessage' in data) || (data.errorMessage is string && data.errorMessage.size() <= 500))
@@ -278,9 +282,9 @@ service cloud.firestore {
       allow get: if true;
     }
 
-    // Users (verified @paavai.edu.in activated immediately; unverified signups saved with emailVerified: false for 12h scheduled cleanup)
+    // Users (verified personal/college emails activated immediately; unverified signups saved with emailVerified: false for 12h scheduled cleanup)
     match /users/{userId} {
-      allow get: if isValidId(userId) && ((hasAllowedCollegeAuth() && request.auth.uid == userId) || isCampusLead());
+      allow get: if isValidId(userId) && ((hasAuthenticatedSession() && request.auth.uid == userId) || isCampusLead());
       allow list: if isCampusLead() || (signedIn() && existing().uid == request.auth.uid);
 
       allow create: if isValidId(userId) && isValidUserProfile(incoming()) && (
@@ -297,7 +301,7 @@ service cloud.firestore {
           )
         ) ||
         (
-          hasAllowedCollegeAuth() &&
+          hasAuthenticatedSession() &&
           request.auth.uid == userId &&
           incoming().uid == request.auth.uid &&
           incoming().email.lower() == request.auth.token.email.lower() &&
@@ -322,7 +326,7 @@ service cloud.firestore {
           incoming().uid == existing().uid &&
           incoming().email == existing().email &&
           (request.auth.uid != userId || incoming().role == existing().role) &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'name', 'regNo', 'department', 'year', 'phone', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'updatedAt'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'name', 'collegeEmail', 'regNo', 'department', 'year', 'phone', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'updatedAt'])
         ) ||
         (
           isOwner(userId) &&
@@ -486,10 +490,53 @@ service cloud.firestore {
       allow list: if isCampusLead();
       allow create: if isValidId(attemptId) && isValidEmailSendAttempt(incoming()) && (
         incoming().type == 'password_reset' ||
-        hasAllowedCollegeAuth()
+        hasAuthenticatedSession()
       );
       allow update: if false;
       allow delete: if isValidId(attemptId) && isCampusLead();
+    }
+
+    // Hash-keyed uniqueness locks for Personal Emails, Phone Numbers & College Email IDs (non-PII, no list)
+    match /unique_emails/{emailHash} {
+      allow get: if isValidSha256Hex(emailHash);
+      allow list: if false;
+      allow create: if isValidSha256Hex(emailHash)
+        && !exists(/databases/$(database)/documents/unique_emails/$(emailHash))
+        && isValidUniqueLock(incoming())
+        && ((hasAuthenticatedSession() && incoming().uid == request.auth.uid) || isCampusLead());
+      allow update: if false;
+      allow delete: if isValidSha256Hex(emailHash) && (
+        isCampusLead() ||
+        (hasAuthenticatedSession() && existing().uid == request.auth.uid)
+      );
+    }
+
+    match /unique_phones/{phoneHash} {
+      allow get: if isValidSha256Hex(phoneHash);
+      allow list: if false;
+      allow create: if isValidSha256Hex(phoneHash)
+        && !exists(/databases/$(database)/documents/unique_phones/$(phoneHash))
+        && isValidUniqueLock(incoming())
+        && ((hasAuthenticatedSession() && incoming().uid == request.auth.uid) || isCampusLead());
+      allow update: if false;
+      allow delete: if isValidSha256Hex(phoneHash) && (
+        isCampusLead() ||
+        (hasAuthenticatedSession() && existing().uid == request.auth.uid)
+      );
+    }
+
+    match /unique_college_emails/{emailHash} {
+      allow get: if isValidSha256Hex(emailHash);
+      allow list: if false;
+      allow create: if isValidSha256Hex(emailHash)
+        && !exists(/databases/$(database)/documents/unique_college_emails/$(emailHash))
+        && isValidUniqueLock(incoming())
+        && ((hasAuthenticatedSession() && incoming().uid == request.auth.uid) || isCampusLead());
+      allow update: if false;
+      allow delete: if isValidSha256Hex(emailHash) && (
+        isCampusLead() ||
+        (hasAuthenticatedSession() && existing().uid == request.auth.uid)
+      );
     }
   }
 }

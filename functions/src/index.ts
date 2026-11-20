@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { getApp, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
@@ -17,10 +18,21 @@ const db =
     : getFirestore(app);
 const auth = getAuth(app);
 
+function normalizePhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+  return digits;
+}
+
+function sha256Hex(raw: string): string {
+  return createHash('sha256').update(raw).digest('hex');
+}
+
 /**
  * Scheduled Cloud Function: runs every 24 hours to query all Firestore users
  * where `emailVerified` is `false` and `createdAt` is older than 12 hours,
- * then deletes those Firestore documents and their corresponding Auth accounts.
+ * then deletes those Firestore documents, their uniqueness lock docs, and their Auth accounts.
  */
 export const cleanupUnverifiedUsers = onSchedule(
   {
@@ -42,12 +54,33 @@ export const cleanupUnverifiedUsers = onSchedule(
       return;
     }
 
-    // Delete expired Firestore user documents in batches of up to 400
-    for (let i = 0; i < snapshot.docs.length; i += 400) {
+    // Delete expired Firestore user documents and uniqueness locks in batches of up to 400 ops
+    const refsToDelete = [];
+    for (const docSnap of snapshot.docs) {
+      refsToDelete.push(docSnap.ref);
+      const data = docSnap.data();
+      const personalEmail = String(data.email || '').trim().toLowerCase();
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(personalEmail)) {
+        const emailLockHash = sha256Hex(`email:${personalEmail}`);
+        refsToDelete.push(db.collection('unique_emails').doc(emailLockHash));
+      }
+      const phone = normalizePhone(String(data.phone || ''));
+      if (/^\d{10,15}$/.test(phone)) {
+        const phoneHash = sha256Hex(`phone:${phone}`);
+        refsToDelete.push(db.collection('unique_phones').doc(phoneHash));
+      }
+      const collegeEmail = String(data.collegeEmail || '').trim().toLowerCase();
+      if (/^[a-z0-9._%+\-]+@([a-z0-9\-]+\.)*paavai\.edu\.in$/i.test(collegeEmail)) {
+        const emailHash = sha256Hex(`college_email:${collegeEmail}`);
+        refsToDelete.push(db.collection('unique_college_emails').doc(emailHash));
+      }
+    }
+
+    for (let i = 0; i < refsToDelete.length; i += 400) {
       const batch = db.batch();
-      const chunk = snapshot.docs.slice(i, i + 400);
-      for (const docSnap of chunk) {
-        batch.delete(docSnap.ref);
+      const chunk = refsToDelete.slice(i, i + 400);
+      for (const ref of chunk) {
+        batch.delete(ref);
       }
       await batch.commit();
     }

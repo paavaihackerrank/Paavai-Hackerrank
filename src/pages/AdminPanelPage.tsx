@@ -80,7 +80,9 @@ export const MemberDirectoryPanel: React.FC = () => {
       if (!q) return true;
       return (
         (u.name || '').toLowerCase().includes(q) ||
-        (u.regNo || '').toLowerCase().includes(q)
+        (u.regNo || '').toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.collegeEmail || '').toLowerCase().includes(q)
       );
     });
   }, [users, search, departmentFilter, yearFilter, roleFilter]);
@@ -110,7 +112,8 @@ export const MemberDirectoryPanel: React.FC = () => {
     const escapeCsv = (val: string) => `"${String(val ?? '').replace(/"/g, '""')}"`;
     const headers = [
       'Name',
-      'Email',
+      'Personal Email',
+      'College Email ID',
       'Register Number',
       'Department',
       'Year',
@@ -123,6 +126,7 @@ export const MemberDirectoryPanel: React.FC = () => {
       [
         escapeCsv(u.name),
         escapeCsv(u.email),
+        escapeCsv(u.collegeEmail || ''),
         escapeCsv(u.regNo),
         escapeCsv(u.department),
         escapeCsv(u.year),
@@ -414,6 +418,12 @@ export const MemberDirectoryPanel: React.FC = () => {
                         )}
                       </p>
                       <p className="text-xs text-slate-500 dark:text-slate-400">{user.email}</p>
+                      {user.collegeEmail &&
+                        user.collegeEmail.toLowerCase() !== user.email.toLowerCase() && (
+                          <p className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                            ID: {user.collegeEmail}
+                          </p>
+                        )}
                       {user.hackerRankHandle && (
                         <p className="font-mono text-[11px] text-slate-400 dark:text-slate-500">
                           {user.hackerRankHandle}
@@ -723,7 +733,7 @@ export const AdminPanelPage: React.FC = () => {
             Member Directory & Settings
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Search verified @paavai.edu.in members, promote or demote Campus Crew roles, review Join
+            Search verified Paavai chapter members, promote or demote Campus Crew roles, review Join
             Us inquiries, and configure chapter-wide settings.
           </p>
         </div>

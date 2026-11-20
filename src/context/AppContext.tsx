@@ -75,6 +75,7 @@ export interface ToastMessage {
 interface SignupPayload {
   name: string;
   email: string;
+  collegeEmail: string;
   password: string;
   regNo: string;
   department: string;
@@ -85,6 +86,7 @@ interface SignupPayload {
 
 interface PendingSignupMeta {
   name: string;
+  collegeEmail: string;
   regNo: string;
   department: string;
   year: string;
@@ -116,7 +118,14 @@ interface AppContextValue {
   login: (email: string, password: string) => Promise<AuthActionResult>;
   signup: (payload: SignupPayload) => Promise<AuthActionResult>;
   sendPasswordReset: (email: string) => Promise<{ ok: boolean; error?: string }>;
-  resendVerificationEmail: () => Promise<{ ok: boolean; error?: string; rateLimited?: boolean }>;
+  resendVerificationEmail: () => Promise<{
+    ok: boolean;
+    error?: string;
+    rateLimited?: boolean;
+    alreadyVerified?: boolean;
+    fallbackWarning?: string;
+    dispatchedAt?: string;
+  }>;
   refreshEmailVerification: () => Promise<AuthActionResult>;
   verifyActionCode: (oobCode: string) => Promise<AuthActionResult>;
   verifyPasswordResetActionCode: (
@@ -315,13 +324,65 @@ async function logEmailSendAttempt(entry: {
   }
 }
 
-export function isAllowedCollegeEmail(email?: string | null): boolean {
+export function isValidAccountEmail(email?: string | null): boolean {
   if (!email) return false;
   const lower = email.trim().toLowerCase();
-  return (
-    /^[a-z0-9._%+\-]+@paavai\.edu\.in$/.test(lower) ||
-    isBootstrappedAdminEmail(lower)
-  );
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(lower);
+}
+
+export function isInstitutionalEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const lower = email.trim().toLowerCase();
+  return /@([a-z0-9\-]+\.)*(paavai\.edu\.in|edu\.in|edu|ac\.in)$/i.test(lower);
+}
+
+export function isPersonalEmail(email?: string | null): boolean {
+  return isValidAccountEmail(email) && !isInstitutionalEmail(email);
+}
+
+export function isCollegeEmailId(email?: string | null): boolean {
+  if (!email) return false;
+  const lower = email.trim().toLowerCase();
+  return /^[a-z0-9._%+\-]+@([a-z0-9\-]+\.)*paavai\.edu\.in$/.test(lower);
+}
+
+export function normalizePhoneNumber(phone?: string | null): string {
+  const digits = (phone || '').replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    return digits.slice(2);
+  }
+  if (digits.length === 11 && digits.startsWith('0')) {
+    return digits.slice(1);
+  }
+  return digits;
+}
+
+export function isValidPhoneNumber(phone?: string | null): boolean {
+  const normalized = normalizePhoneNumber(phone);
+  return /^\d{10,15}$/.test(normalized);
+}
+
+async function sha256Hex(raw: string): Promise<string> {
+  const bytes = new TextEncoder().encode(raw);
+  const hashBuffer = await window.crypto.subtle.digest('SHA-256', bytes);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function getEmailLockId(email: string): Promise<string> {
+  return sha256Hex(`email:${email.trim().toLowerCase()}`);
+}
+
+export async function getPhoneLockId(phone: string): Promise<string> {
+  return sha256Hex(`phone:${normalizePhoneNumber(phone)}`);
+}
+
+export async function getCollegeEmailLockId(collegeEmail: string): Promise<string> {
+  return sha256Hex(`college_email:${collegeEmail.trim().toLowerCase()}`);
+}
+
+export function isAllowedCollegeEmail(email?: string | null): boolean {
+  return isValidAccountEmail(email);
 }
 
 const PENDING_META_PREFIX = 'hrcc_pending_signup_';
@@ -341,6 +402,7 @@ const LEGACY_DEMO_EMAILS = new Set([
   'student@paavai.edu.in',
   'praveen.crew@paavai.edu.in',
   'nivetha.m@paavai.edu.in',
+  'paavaihackerrank@gmail.com',
 ]);
 
 const LEGACY_DEMO_TEAM_IDS = new Set([
@@ -529,18 +591,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             );
           }
 
+          const rawEmailLower = String(data.email || fbUser.email || '').trim().toLowerCase();
+          const rawPhoneStr = String(data.phone || '');
+          const rawCollegeLower = String(data.collegeEmail || '').trim().toLowerCase();
+          const lockNowISO = new Date().toISOString();
+
+          if (isValidAccountEmail(rawEmailLower)) {
+            const eId = await getEmailLockId(rawEmailLower);
+            const eSnap = await getDoc(doc(db, 'unique_emails', eId)).catch(() => null);
+            if (eSnap && !eSnap.exists()) {
+              await setDoc(doc(db, 'unique_emails', eId), {
+                uid: fbUser.uid,
+                createdAt: lockNowISO,
+              }).catch(() => {});
+            }
+          }
+          if (isValidPhoneNumber(rawPhoneStr)) {
+            const pId = await getPhoneLockId(rawPhoneStr);
+            const pSnap = await getDoc(doc(db, 'unique_phones', pId)).catch(() => null);
+            if (pSnap && !pSnap.exists()) {
+              await setDoc(doc(db, 'unique_phones', pId), {
+                uid: fbUser.uid,
+                createdAt: lockNowISO,
+              }).catch(() => {});
+            }
+          }
+          if (isCollegeEmailId(rawCollegeLower)) {
+            const cId = await getCollegeEmailLockId(rawCollegeLower);
+            const cSnap = await getDoc(doc(db, 'unique_college_emails', cId)).catch(() => null);
+            if (cSnap && !cSnap.exists()) {
+              await setDoc(doc(db, 'unique_college_emails', cId), {
+                uid: fbUser.uid,
+                createdAt: lockNowISO,
+              }).catch(() => {});
+            }
+          }
+
           return resolvedRole;
         }
 
         const pending = readPendingMeta(fbUser.uid);
         const assignedRole: Exclude<UserRole, 'outsider'> = isBootAdmin ? 'lead' : 'member';
         const nowISO = new Date().toISOString();
-        const emailPrefix = (fbUser.email || '').split('@')[0];
+        const emailLower = clampStr((fbUser.email || '').toLowerCase(), 160);
+        const resolvedCollegeEmail = clampStr(
+          (pending?.collegeEmail || (isCollegeEmailId(emailLower) ? emailLower : '')).toLowerCase(),
+          160
+        );
+        const emailPrefix = emailLower.split('@')[0];
         const defaultLeadRegNo = /^\d{6,}$/.test(emailPrefix) ? emailPrefix : '622123104144';
 
         const newProfileDoc = {
           uid: fbUser.uid,
-          email: clampStr((fbUser.email || '').toLowerCase(), 160),
+          email: emailLower,
+          ...(resolvedCollegeEmail ? { collegeEmail: resolvedCollegeEmail } : {}),
           name: ensureMinLen(pending?.name || fbUser.displayName || (isBootAdmin ? 'Campus Lead' : 'Paavai Student'), 'Paavai Student', 2, 100),
           regNo: clampStr(
             (pending?.regNo || (isBootAdmin ? defaultLeadRegNo : 'PEC-MEMBER')).toUpperCase(),
@@ -607,13 +711,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const isVerifiedAllowedUser = Boolean(
     firebaseUser &&
       firebaseUser.emailVerified &&
-      isAllowedCollegeEmail(firebaseUser.email)
+      isValidAccountEmail(firebaseUser.email)
   );
 
   const needsEmailVerification = Boolean(
     firebaseUser &&
       !firebaseUser.emailVerified &&
-      isAllowedCollegeEmail(firebaseUser.email)
+      isValidAccountEmail(firebaseUser.email)
   );
 
   const unverifiedEmail = needsEmailVerification ? firebaseUser?.email || null : null;
@@ -639,6 +743,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             id: snap.id,
             name: String(data.name || firebaseUser.displayName || 'Paavai Coder'),
             email: String(data.email || firebaseUser.email || ''),
+            collegeEmail: data.collegeEmail ? String(data.collegeEmail) : '',
             role: role === 'lead' || role === 'crew' ? role : 'member',
             emailVerified: data.emailVerified !== false,
             regNo: String(data.regNo || data.registerNumber || 'PEC-MEMBER'),
@@ -977,6 +1082,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               id: d.id,
               name: String(x.name || ''),
               email: String(x.email || ''),
+              collegeEmail: x.collegeEmail ? String(x.collegeEmail) : '',
               role: role === 'lead' || role === 'crew' ? role : 'member',
               emailVerified: x.emailVerified !== false,
               regNo: String(x.regNo || x.registerNumber || ''),
@@ -1066,6 +1172,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const [
           usersSnap,
           teamSnap,
+          publicProfilesSnap,
           regsSnap,
           joinSnap,
           lbSnap,
@@ -1073,9 +1180,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           annSnap,
           galSnap,
           resSnap,
+          emailLogsSnap,
         ] = await Promise.all([
           getDocs(collection(db, 'users')),
           getDocs(collection(db, 'team_members')),
+          getDocs(collection(db, 'public_profiles')),
           getDocs(collection(db, 'registrations')),
           getDocs(collection(db, 'join_requests')),
           getDocs(collection(db, 'leaderboard')),
@@ -1083,11 +1192,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           getDocs(collection(db, 'announcements')),
           getDocs(collection(db, 'gallery')),
           getDocs(collection(db, 'resources')),
+          getDocs(collection(db, 'emailSendAttempts')),
         ]);
 
         if (cancelled) return;
 
         const ops: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
+        const purgedUserIds = new Set<string>(LEGACY_DEMO_USER_IDS);
         const realTeamMap = new Map<
           string,
           {
@@ -1101,16 +1212,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         >();
 
+        const backfillLocks: Array<{
+          uid: string;
+          email: string;
+          phone: string;
+          collegeEmail: string;
+        }> = [];
+        const purgeLocks: Array<{ email: string; phone: string; collegeEmail: string }> = [];
+
         usersSnap.docs.forEach((d) => {
           const x = d.data();
           const email = String(x.email || '').trim().toLowerCase();
+          const rawCollegeEmail = String(
+            x.collegeEmail || (isCollegeEmailId(email) ? email : '')
+          )
+            .trim()
+            .toLowerCase();
+          const rawPhone = String(x.phone || '');
           const isDemoUser =
             LEGACY_DEMO_USER_IDS.has(d.id) || LEGACY_DEMO_EMAILS.has(email);
 
           if (isDemoUser && d.id !== firebaseUser.uid) {
+            purgedUserIds.add(d.id);
             ops.push((b) => b.delete(d.ref));
+            purgeLocks.push({ email, phone: rawPhone, collegeEmail: rawCollegeEmail });
             return;
           }
+
+          backfillLocks.push({
+            uid: d.id,
+            email,
+            phone: rawPhone,
+            collegeEmail: rawCollegeEmail,
+          });
 
           const role = x.role as Exclude<UserRole, 'outsider'>;
           if (role === 'lead' || role === 'crew') {
@@ -1123,6 +1257,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               bio: String(x.bio || ''),
               hackerRankHandle: String(x.hackerRankHandle || ''),
             });
+          }
+        });
+
+        // Backfill missing uniqueness lock docs for active verified users & remove purged locks
+        const nowLockISO = new Date().toISOString();
+        for (const item of backfillLocks) {
+          if (isValidAccountEmail(item.email)) {
+            const eId = await getEmailLockId(item.email);
+            const eRef = doc(db, 'unique_emails', eId);
+            const eSnap = await getDoc(eRef);
+            if (!eSnap.exists()) {
+              ops.push((b) => b.set(eRef, { uid: item.uid, createdAt: nowLockISO }));
+            }
+          }
+          if (isValidPhoneNumber(item.phone)) {
+            const pId = await getPhoneLockId(item.phone);
+            const pRef = doc(db, 'unique_phones', pId);
+            const pSnap = await getDoc(pRef);
+            if (!pSnap.exists()) {
+              ops.push((b) => b.set(pRef, { uid: item.uid, createdAt: nowLockISO }));
+            }
+          }
+          if (isCollegeEmailId(item.collegeEmail)) {
+            const cId = await getCollegeEmailLockId(item.collegeEmail);
+            const cRef = doc(db, 'unique_college_emails', cId);
+            const cSnap = await getDoc(cRef);
+            if (!cSnap.exists()) {
+              ops.push((b) => b.set(cRef, { uid: item.uid, createdAt: nowLockISO }));
+            }
+          }
+        }
+        for (const purged of purgeLocks) {
+          if (isValidAccountEmail(purged.email)) {
+            const eId = await getEmailLockId(purged.email);
+            ops.push((b) => b.delete(doc(db, 'unique_emails', eId)));
+          }
+          if (isValidPhoneNumber(purged.phone)) {
+            const pId = await getPhoneLockId(purged.phone);
+            ops.push((b) => b.delete(doc(db, 'unique_phones', pId)));
+          }
+          if (isCollegeEmailId(purged.collegeEmail)) {
+            const cId = await getCollegeEmailLockId(purged.collegeEmail);
+            ops.push((b) => b.delete(doc(db, 'unique_college_emails', cId)));
+          }
+        }
+
+        // Remove stale/demo/purged public_profiles docs
+        publicProfilesSnap.docs.forEach((d) => {
+          if (purgedUserIds.has(d.id)) {
+            ops.push((b) => b.delete(d.ref));
+          }
+        });
+
+        // Remove emailSendAttempts for removed accounts like paavaihackerrank@gmail.com
+        emailLogsSnap.docs.forEach((d) => {
+          const x = d.data();
+          const logEmail = String(x.email || '').trim().toLowerCase();
+          if (LEGACY_DEMO_EMAILS.has(logEmail)) {
+            ops.push((b) => b.delete(d.ref));
           }
         });
 
@@ -1159,7 +1352,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const userEmail = String(x.userEmail || '').trim().toLowerCase();
           if (
             LEGACY_DEMO_REGISTRATION_IDS.has(d.id) ||
-            LEGACY_DEMO_USER_IDS.has(userId) ||
+            purgedUserIds.has(userId) ||
             LEGACY_DEMO_EMAILS.has(userEmail)
           ) {
             ops.push((b) => b.delete(d.ref));
@@ -1242,10 +1435,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // ---------------- FIREBASE AUTH ACTIONS ----------------
   const login = async (email: string, password: string): Promise<AuthActionResult> => {
     const trimmedEmail = email.trim().toLowerCase();
-    if (!isAllowedCollegeEmail(trimmedEmail)) {
+    if (!isValidAccountEmail(trimmedEmail)) {
       return {
         ok: false,
-        error: 'Only verified @paavai.edu.in college email addresses are allowed to sign in.',
+        error: 'Enter a valid registered email address.',
       };
     }
     try {
@@ -1290,22 +1483,112 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const signup = async (payload: SignupPayload): Promise<AuthActionResult> => {
     const trimmedEmail = payload.email.trim().toLowerCase();
-    if (!isAllowedCollegeEmail(trimmedEmail)) {
+    const trimmedCollegeEmail = payload.collegeEmail.trim().toLowerCase();
+    const normalizedPhone = normalizePhoneNumber(payload.phone);
+
+    if (!isValidAccountEmail(trimmedEmail)) {
       return {
         ok: false,
-        error: 'Sign up requires an official @paavai.edu.in college email address.',
+        error: 'Enter a valid personal email address for your login and verification emails.',
       };
     }
+    if (isInstitutionalEmail(trimmedEmail)) {
+      return {
+        ok: false,
+        error:
+          'Institutional email addresses (@paavai.edu.in / .edu.in) cannot be used for login. Please enter a personal email address (e.g. @gmail.com, @outlook.com).',
+      };
+    }
+    if (!isCollegeEmailId(trimmedCollegeEmail)) {
+      return {
+        ok: false,
+        error: 'Enter a valid @paavai.edu.in college email ID.',
+      };
+    }
+    if (!isValidPhoneNumber(normalizedPhone)) {
+      return {
+        ok: false,
+        error: 'Enter a valid 10-digit phone number.',
+      };
+    }
+
     try {
+      const [emailLockId, phoneLockId, collegeEmailLockId] = await Promise.all([
+        getEmailLockId(trimmedEmail),
+        getPhoneLockId(normalizedPhone),
+        getCollegeEmailLockId(trimmedCollegeEmail),
+      ]);
+
+      const [emailLockSnap, phoneLockSnap, collegeEmailLockSnap] = await Promise.all([
+        getDoc(doc(db, 'unique_emails', emailLockId)),
+        getDoc(doc(db, 'unique_phones', phoneLockId)),
+        getDoc(doc(db, 'unique_college_emails', collegeEmailLockId)),
+      ]);
+
+      const emailExists = emailLockSnap.exists();
+      const phoneExists = phoneLockSnap.exists();
+      const collegeEmailExists = collegeEmailLockSnap.exists();
+
+      if (emailExists || phoneExists || collegeEmailExists) {
+        const matchedFields: string[] = [];
+        if (emailExists) matchedFields.push('email address');
+        if (phoneExists) matchedFields.push('phone number');
+        if (collegeEmailExists) matchedFields.push('college email ID');
+        const msg = `An account with these credentials (${matchedFields.join(', ')}) already exists in the database. Please sign in or try using other data.`;
+        addToast('Account already exists', msg, 'error');
+        return { ok: false, error: msg };
+      }
+
       const cred = await createUserWithEmailAndPassword(auth, trimmedEmail, payload.password);
       await updateProfile(cred.user, { displayName: clampStr(payload.name, 100) });
+
+      const nowISO = new Date().toISOString();
+      let emailClaimed = false;
+      let phoneClaimed = false;
+      let collegeEmailClaimed = false;
+
+      try {
+        await setDoc(doc(db, 'unique_emails', emailLockId), {
+          uid: cred.user.uid,
+          createdAt: nowISO,
+        });
+        emailClaimed = true;
+        await setDoc(doc(db, 'unique_phones', phoneLockId), {
+          uid: cred.user.uid,
+          createdAt: nowISO,
+        });
+        phoneClaimed = true;
+        await setDoc(doc(db, 'unique_college_emails', collegeEmailLockId), {
+          uid: cred.user.uid,
+          createdAt: nowISO,
+        });
+        collegeEmailClaimed = true;
+      } catch {
+        if (emailClaimed) {
+          await deleteDoc(doc(db, 'unique_emails', emailLockId)).catch(() => {});
+        }
+        if (phoneClaimed) {
+          await deleteDoc(doc(db, 'unique_phones', phoneLockId)).catch(() => {});
+        }
+        if (collegeEmailClaimed) {
+          await deleteDoc(doc(db, 'unique_college_emails', collegeEmailLockId)).catch(() => {});
+        }
+        await cred.user.delete().catch(() => {});
+        const duplicateField = !emailClaimed
+          ? 'email address'
+          : !phoneClaimed
+            ? 'phone number'
+            : 'college email ID';
+        const dupMsg = `An account with these credentials (${duplicateField}) already exists in the database. Please sign in or try using other data.`;
+        addToast('Account already exists', dupMsg, 'error');
+        return { ok: false, error: dupMsg };
+      }
 
       let emailSent = false;
       let emailErrorMsg = '';
       try {
         const dispatchOutcome = await sendVerificationWithRedirect(cred.user);
         emailSent = true;
-        setResendCooldownTimestamp(trimmedEmail);
         void logEmailSendAttempt({
           type: 'verification',
           email: trimmedEmail,
@@ -1341,13 +1624,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       }
 
-      const nowISO = new Date().toISOString();
-      const pendingMeta = {
+      const pendingMeta: PendingSignupMeta = {
         name: ensureMinLen(payload.name, 'Paavai Student', 2, 100),
+        collegeEmail: clampStr(trimmedCollegeEmail, 160),
         regNo: clampStr((payload.regNo || 'PEC-MEMBER').toUpperCase(), 20),
         department: ensureMinLen(payload.department, 'CSE', 2, 40),
         year: ensureMinLen(payload.year, '1st Year', 2, 20),
-        phone: clampStr(payload.phone, 20),
+        phone: clampStr(normalizedPhone, 20),
         hackerRankHandle: clampStr(
           payload.hackerRankHandle || `@${trimmedEmail.split('@')[0].slice(0, 20)}`,
           60
@@ -1361,6 +1644,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await setDoc(doc(db, 'users', cred.user.uid), {
           uid: cred.user.uid,
           email: clampStr(trimmedEmail, 160),
+          collegeEmail: pendingMeta.collegeEmail,
           name: pendingMeta.name,
           regNo: pendingMeta.regNo,
           department: pendingMeta.department,
@@ -1405,7 +1689,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       }
       if (code === 'auth/email-already-in-use') {
-        return { ok: false, error: 'An account with this email already exists.' };
+        return {
+          ok: false,
+          error:
+            'A user with this personal email is already found in the database. Try using other data or sign in.',
+        };
       }
       return {
         ok: false,
@@ -1416,10 +1704,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const sendPasswordReset = async (email: string): Promise<{ ok: boolean; error?: string }> => {
     const trimmedEmail = email.trim().toLowerCase();
-    if (!trimmedEmail || !isAllowedCollegeEmail(trimmedEmail)) {
+    if (!trimmedEmail || !isValidAccountEmail(trimmedEmail)) {
       return {
         ok: false,
-        error: 'Enter your registered @paavai.edu.in email address.',
+        error: 'Enter your registered personal email address.',
       };
     }
     const continueUrl =
@@ -1477,7 +1765,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         code === 'auth/user-not-found'
           ? 'No account found with this email address.'
           : code === 'auth/invalid-email'
-            ? 'Enter a valid @paavai.edu.in email address.'
+            ? 'Enter a valid registered email address.'
             : code === 'auth/too-many-requests'
               ? 'Too many requests. Please wait a few minutes and try again.'
               : err instanceof Error
@@ -1503,11 +1791,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addToast('Failed to send verification email', msg, 'error');
       return { ok: false, error: msg };
     }
+
+    try {
+      await reload(auth.currentUser);
+      if (auth.currentUser.emailVerified) {
+        await auth.currentUser.getIdToken(true);
+        setFirebaseUser(auth.currentUser);
+        await ensureUserProfile(auth.currentUser);
+        addToast('Email already verified!', 'Your account is now active.', 'success');
+        return { ok: true, alreadyVerified: true };
+      }
+    } catch {
+      // Proceed to send attempt even if reload check fails
+    }
+
     const targetEmail = (auth.currentUser.email || '').trim().toLowerCase();
+    const dispatchedAt = new Date().toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+
     try {
       const dispatchOutcome = await sendVerificationWithRedirect(auth.currentUser);
       setResendCooldownTimestamp(auth.currentUser.email);
-      if (targetEmail && isAllowedCollegeEmail(targetEmail)) {
+      if (targetEmail && isValidAccountEmail(targetEmail)) {
         await logEmailSendAttempt({
           type: 'verification',
           email: targetEmail,
@@ -1519,11 +1827,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       }
       addToast(
-        'Verification email sent',
-        `A verification link has been sent to ${auth.currentUser.email}. Check your inbox (including Spam/Promotions).`,
+        'Verification email requested',
+        `Firebase Auth accepted the request for ${auth.currentUser.email} at ${dispatchedAt}.`,
         'success'
       );
-      return { ok: true };
+      return {
+        ok: true,
+        fallbackWarning: dispatchOutcome.fallbackMessage,
+        dispatchedAt,
+      };
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code || 'unknown';
       const rateLimited = code === 'auth/too-many-requests';
@@ -1531,11 +1843,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setResendCooldownTimestamp(auth.currentUser.email);
       }
       const errMsg = rateLimited
-        ? 'Too many verification requests. Please wait 60 seconds before trying again.'
+        ? 'Firebase Auth blocked this request (auth/too-many-requests) because multiple verification emails were sent recently. Wait a few minutes before retrying.'
         : err instanceof Error
           ? err.message
           : 'Could not resend verification email.';
-      if (targetEmail && isAllowedCollegeEmail(targetEmail)) {
+      if (targetEmail && isValidAccountEmail(targetEmail)) {
         await logEmailSendAttempt({
           type: 'verification',
           email: targetEmail,
@@ -1554,6 +1866,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ok: false,
         error: errMsg,
         rateLimited,
+        dispatchedAt,
       };
     }
   };
@@ -1576,9 +1889,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       }
 
-      if (!isAllowedCollegeEmail(refreshed.email)) {
+      if (!isValidAccountEmail(refreshed.email)) {
         await signOut(auth);
-        return { ok: false, error: 'Only @paavai.edu.in emails are permitted.' };
+        return { ok: false, error: 'A valid registered email address is required.' };
       }
 
       const role = await ensureUserProfile(refreshed);
@@ -1600,7 +1913,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await auth.currentUser.getIdToken(true);
         const refreshed = auth.currentUser;
         setFirebaseUser(refreshed);
-        if (refreshed.emailVerified && isAllowedCollegeEmail(refreshed.email)) {
+        if (refreshed.emailVerified && isValidAccountEmail(refreshed.email)) {
           const role = await ensureUserProfile(refreshed);
           return { ok: true, role, redirectPath: getDashboardPath(role) };
         }
@@ -1676,7 +1989,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await auth.currentUser.getIdToken(true);
       const refreshed = auth.currentUser;
       setFirebaseUser(refreshed);
-      if (refreshed.emailVerified && isAllowedCollegeEmail(refreshed.email)) {
+      if (refreshed.emailVerified && isValidAccountEmail(refreshed.email)) {
         const role = await ensureUserProfile(refreshed);
         return { verified: true, role, redirectPath: getDashboardPath(role) };
       }
@@ -1857,7 +2170,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!currentUser || !firebaseUser || !can('canRegisterForEvents')) {
       addToast(
         'Sign in required',
-        'Sign in with a verified @paavai.edu.in account to register for events.',
+        'Sign in with a verified student account to register for events.',
         'error'
       );
       return;
@@ -2161,9 +2474,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     const path = `users/${userId}`;
     try {
+      const knownUser = users.find((u) => u.id === userId);
+      const userSnap = knownUser ? null : await getDoc(doc(db, 'users', userId));
+      const emailVal = knownUser?.email ?? String(userSnap?.data()?.email || '');
+      const phoneVal = knownUser?.phone ?? String(userSnap?.data()?.phone || '');
+      const collegeEmailVal =
+        knownUser?.collegeEmail ??
+        String(
+          userSnap?.data()?.collegeEmail ||
+            (isCollegeEmailId(String(userSnap?.data()?.email || ''))
+              ? userSnap?.data()?.email
+              : '')
+        );
+
       await deleteDoc(doc(db, 'users', userId));
       await deleteDoc(doc(db, 'team_members', userId));
-      addToast('User removed', 'Deleted from Firestore directory.', 'info');
+      await deleteDoc(doc(db, 'public_profiles', userId)).catch(() => {});
+
+      if (isValidAccountEmail(emailVal)) {
+        const emailLockId = await getEmailLockId(emailVal);
+        await deleteDoc(doc(db, 'unique_emails', emailLockId)).catch(() => {});
+      }
+      if (isValidPhoneNumber(phoneVal)) {
+        const phoneLockId = await getPhoneLockId(phoneVal);
+        await deleteDoc(doc(db, 'unique_phones', phoneLockId)).catch(() => {});
+      }
+      if (isCollegeEmailId(collegeEmailVal)) {
+        const collegeEmailLockId = await getCollegeEmailLockId(collegeEmailVal);
+        await deleteDoc(doc(db, 'unique_college_emails', collegeEmailLockId)).catch(() => {});
+      }
+
+      addToast('User removed', 'Deleted from Firestore directory and uniqueness locks.', 'info');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -2322,6 +2663,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         : currentUser.skills;
     const nowISO = new Date().toISOString();
 
+    let nextPhoneStr: string | undefined;
+    let newPhoneLockId: string | null = null;
+    let oldPhoneLockId: string | null = null;
+
+    if (updates.phone !== undefined) {
+      const trimmedPhone = updates.phone.trim();
+      if (trimmedPhone) {
+        if (!isValidPhoneNumber(trimmedPhone)) {
+          addToast(
+            'Invalid phone number',
+            'Enter a valid 10-digit phone number.',
+            'error'
+          );
+          return;
+        }
+        const normalizedNew = normalizePhoneNumber(trimmedPhone);
+        const normalizedPrev = normalizePhoneNumber(currentUser.phone);
+        nextPhoneStr = clampStr(normalizedNew, 20);
+        if (normalizedNew !== normalizedPrev) {
+          newPhoneLockId = await getPhoneLockId(normalizedNew);
+          const lockSnap = await getDoc(doc(db, 'unique_phones', newPhoneLockId));
+          if (lockSnap.exists() && lockSnap.data()?.uid !== firebaseUser.uid) {
+            addToast(
+              'Duplicate phone number',
+              'A user with this phone number is already found in the database. Try using other data.',
+              'error'
+            );
+            return;
+          }
+          if (!lockSnap.exists()) {
+            try {
+              await setDoc(doc(db, 'unique_phones', newPhoneLockId), {
+                uid: firebaseUser.uid,
+                createdAt: nowISO,
+              });
+            } catch {
+              addToast(
+                'Duplicate phone number',
+                'A user with this phone number is already found in the database. Try using other data.',
+                'error'
+              );
+              return;
+            }
+          }
+          if (isValidPhoneNumber(normalizedPrev)) {
+            oldPhoneLockId = await getPhoneLockId(normalizedPrev);
+          }
+        }
+      } else {
+        nextPhoneStr = '';
+      }
+    }
+
     try {
       await updateDoc(doc(db, 'users', firebaseUser.uid), {
         ...(updates.name !== undefined ? { name: nextName } : {}),
@@ -2330,7 +2724,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : {}),
         ...(updates.department !== undefined ? { department: nextDepartment } : {}),
         ...(updates.year !== undefined ? { year: nextYear } : {}),
-        ...(updates.phone !== undefined ? { phone: clampStr(updates.phone, 20) } : {}),
+        ...(nextPhoneStr !== undefined ? { phone: nextPhoneStr } : {}),
         ...(updates.hackerRankHandle !== undefined ? { hackerRankHandle: nextHandle } : {}),
         ...(updates.hackerRankUrl !== undefined ? { hackerRankUrl: nextHackerRankUrl } : {}),
         ...(updates.githubUrl !== undefined ? { githubUrl: nextGithubUrl } : {}),
@@ -2339,6 +2733,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...(updates.skills !== undefined ? { skills: nextSkills } : {}),
         updatedAt: nowISO,
       });
+
+      if (oldPhoneLockId && oldPhoneLockId !== newPhoneLockId) {
+        const oldSnap = await getDoc(doc(db, 'unique_phones', oldPhoneLockId)).catch(() => null);
+        if (oldSnap?.exists() && oldSnap.data()?.uid === firebaseUser.uid) {
+          await deleteDoc(doc(db, 'unique_phones', oldPhoneLockId)).catch(() => {});
+        }
+      }
 
       const dsaCount = resources.filter(
         (r) => r.track === 'DSA' && completedResourceIds.includes(r.id)

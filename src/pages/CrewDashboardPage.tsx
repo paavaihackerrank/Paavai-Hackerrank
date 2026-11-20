@@ -444,7 +444,7 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
                 onChange={(e) => setEvMembersOnly(e.target.checked)}
                 className="rounded accent-[#00EA64]"
               />
-              <span>Members-only event (requires verified @paavai.edu.in account)</span>
+              <span>Members-only event (requires verified member account)</span>
             </label>
             <button
               type="submit"

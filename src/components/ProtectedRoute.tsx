@@ -47,7 +47,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
         state={{
           from: location.pathname,
           reason:
-            'This page requires a verified @paavai.edu.in HackerRank Campus Crew account.',
+            'This page requires a verified HackerRank Campus Crew member account.',
           requiredRoleLabel: requiredRoleLabel || 'Logged-in Member',
         }}
       />

@@ -85,9 +85,10 @@ export const JoinUsPage: React.FC = () => {
             Request to Join the Crew
           </h1>
           <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400 leading-relaxed">
-            Already have a <strong>@paavai.edu.in</strong> email? Sign up directly to get
-            immediate Student Community Member access once verified. Or submit your interest here to
-            connect with the HackerRank Campus Crew team.
+            Ready to join? Sign up directly with your personal email, unique{' '}
+            <strong>@paavai.edu.in</strong> college email ID, and phone number to get immediate
+            Student Community Member access once verified. Or submit your interest here to connect
+            with the HackerRank Campus Crew team.
           </p>
 
           <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3 text-sm text-slate-600 dark:text-slate-300">
@@ -95,7 +96,7 @@ export const JoinUsPage: React.FC = () => {
               How onboarding works
             </p>
             <ol className="list-decimal list-inside space-y-2 text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-              <li>Students with @paavai.edu.in sign up and verify their inbox for instant access.</li>
+              <li>Students register with a personal email, unique @paavai.edu.in ID, and unique phone number.</li>
               <li>Prospective contributors can share their skills via this intake form.</li>
               <li>Campus Lead reviews Crew interest applications in the Lead Dashboard.</li>
             </ol>
@@ -119,9 +120,9 @@ export const JoinUsPage: React.FC = () => {
               </h2>
               <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
                 Thank you, <strong>{form.name}</strong> ({form.registerNumber}). Your Crew inquiry
-                has been recorded in the Lead Dashboard. If you have a{' '}
-                <strong>@paavai.edu.in</strong> email, you can also sign up right now for instant
-                member access.
+                has been recorded in the Lead Dashboard. You can also create a student account right
+                now using your personal email and unique{' '}
+                <strong>@paavai.edu.in</strong> college ID for instant member access.
               </p>
               <div className="flex flex-wrap gap-3 pt-2">
                 <button

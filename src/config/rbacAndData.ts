@@ -184,7 +184,7 @@ export const ROLE_META: Record<
   member: {
     label: 'Student Community Member',
     shortLabel: 'Member',
-    description: 'Verified @paavai.edu.in student with full leaderboard, roadmap access, and event registration privileges.',
+    description: 'Verified Paavai student with full leaderboard, roadmap access, and event registration privileges.',
   },
   outsider: {
     label: 'Outsider (Guest)',
@@ -203,6 +203,7 @@ export interface UserAccount {
   id: string;
   name: string;
   email: string;
+  collegeEmail?: string;
   role: Exclude<UserRole, 'outsider'>;
   emailVerified?: boolean;
   regNo: string;
@@ -411,13 +412,13 @@ export const FAQ_ITEMS: FaqItem[] = [
     id: 'faq_01',
     question: 'Who can join the HackerRank Campus Crew at Paavai Engineering College?',
     answer:
-      'Any current undergraduate or postgraduate student at Paavai Engineering College with an official @paavai.edu.in email from any department (CSE, IT, AI & DS, Cyber Security, ECE, EEE, Mechanical, and more) can sign up and become a Student Community Member.',
+      'Any current undergraduate or postgraduate student at Paavai Engineering College from any department (CSE, IT, AI & DS, Cyber Security, ECE, EEE, Mechanical, and more) can sign up with their personal email, unique @paavai.edu.in college email ID, and unique phone number.',
   },
   {
     id: 'faq_02',
     question: 'How do email verification and promotion to Campus Crew work?',
     answer:
-      'Sign up with your @paavai.edu.in email and verify your inbox link to receive immediate Student Community Member access—no manual approval wait required. Active members who contribute to contests and mentoring can be promoted to Campus Crew Member by the Campus Lead.',
+      'Sign up using your personal email and password (along with your unique college email ID and phone number) and verify your personal email inbox link to receive immediate Student Community Member access. Active members who contribute to contests and mentoring can be promoted to Campus Crew Member by the Campus Lead.',
   },
   {
     id: 'faq_03',
@@ -435,6 +436,6 @@ export const FAQ_ITEMS: FaqItem[] = [
     id: 'faq_05',
     question: 'Are events and workshops free for Paavai students?',
     answer:
-      'Yes. All HackerRank Campus Crew workshops, coding contests, and placement sprints are completely free for Paavai Engineering College students. Members-only deep-dive labs simply require a verified @paavai.edu.in account.',
+      'Yes. All HackerRank Campus Crew workshops, coding contests, and placement sprints are completely free for Paavai Engineering College students. Members-only deep-dive labs simply require a verified member account.',
   },
 ];
