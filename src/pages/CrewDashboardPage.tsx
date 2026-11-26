@@ -1,23 +1,32 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  Award,
   BookOpen,
   Calendar,
   Check,
+  CheckCircle2,
   ChevronDown,
   ClipboardList,
   Download,
   Edit3,
+  ExternalLink,
+  FileText,
+  Globe,
   Image as ImageIcon,
+  Link2,
+  Loader2,
   LucideIcon,
   Mail,
   Megaphone,
   Plus,
   QrCode,
+  RefreshCw,
   Settings,
   ShieldCheck,
   Trash2,
   Trophy,
+  UserCheck,
   UserPlus,
   Users,
   X,
@@ -27,19 +36,32 @@ import {
   CHAPTER_IMAGES,
   CampusEvent,
   DEPARTMENTS,
+  EventMode,
   GalleryPhoto,
   ResourceTrack,
+  buildAttendeeTicketCode,
+  getEffectiveEventMode,
+  isOnlineAttendanceEnabled,
+  isOnlineEvent,
 } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
+import { DRIVE_SHARING_HINT, validateDriveOrHttpsUrl } from '../lib/driveUtils';
+import { printEventNaacReport } from '../lib/eventReportPrint';
+import { SafeImage } from '../components/SafeImage';
 
 import { MemberDirectoryPanel, JoinRequestsPanel, SiteSettingsPanel } from './AdminPanelPage';
 import { EventCheckInQRGenerator } from '../components/EventCheckInQRGenerator';
+import { UnstopCsvImporterPanel } from '../components/UnstopCsvImporterPanel';
+import { CertificatesManagerPanel } from '../components/CertificatesManagerPanel';
+import { DashboardWidget, MemberCheckInSummaryWidget } from '../components/DashboardWidget';
+import { AttendanceCsvExportModal } from '../components/AttendanceCsvExportModal';
 import { PageSeo } from '../components/PageSeo';
 
 type DashboardTab =
   | 'members'
   | 'events'
   | 'checkins'
+  | 'certificates'
   | 'announcements'
   | 'gallery'
   | 'resources'
@@ -60,13 +82,19 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
     resources,
     leaderboard,
     registrations,
+    unstopParticipants,
     eventCheckIns,
+    certificates,
     joinRequests,
+    siteSettings,
     createEvent,
     updateEvent,
     deleteEvent,
     approveEvent,
     rejectEvent,
+    toggleOnlineEventAttendance,
+    fetchUnstopEventDetails,
+    syncEventFromUnstop,
     createAnnouncement,
     deleteAnnouncement,
     approveAnnouncement,
@@ -78,12 +106,16 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
     upsertLeaderboardEntry,
     deleteLeaderboardEntry,
     exportRegistrationsCSV,
+    resendEventTicketEmail,
   } = useApp();
 
   const isLead = can('canApproveContent') && mode !== 'crew';
   const [activeTab, setActiveTab] = useState<DashboardTab>(
     mode === 'lead' ? 'members' : 'events'
   );
+  const [resendingTicketRegId, setResendingTicketRegId] = useState<string | null>(null);
+  const [attendanceExportModalOpen, setAttendanceExportModalOpen] = useState(false);
+  const [attendanceExportEventId, setAttendanceExportEventId] = useState<string>('all');
   const [mobileSectionNavOpen, setMobileSectionNavOpen] = useState(false);
   const [expandedClusters, setExpandedClusters] = useState<Record<string, boolean>>({
     community: true,
@@ -104,11 +136,30 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [evTitle, setEvTitle] = useState('');
   const [evCategory, setEvCategory] = useState<CampusEvent['category']>('Workshop');
+  const [evMode, setEvMode] = useState<EventMode>('offline');
+  const [evAttendanceEnabled, setEvAttendanceEnabled] = useState(false);
+  const [evMeetingUrl, setEvMeetingUrl] = useState('');
   const [evDate, setEvDate] = useState('2026-12-28T10:00');
   const [evVenue, setEvVenue] = useState('CSE Seminar Hall, Paavai Campus');
   const [evDesc, setEvDesc] = useState('');
   const [evCapacity, setEvCapacity] = useState(120);
   const [evMembersOnly, setEvMembersOnly] = useState(false);
+  const [evBannerUrl, setEvBannerUrl] = useState(CHAPTER_IMAGES.hackathonArena);
+  const [evDocUrl, setEvDocUrl] = useState('');
+  const [evUnstopUrl, setEvUnstopUrl] = useState('');
+  const [evUnstopCompetitionId, setEvUnstopCompetitionId] = useState('');
+  const [evUnstopRegistrationsCount, setEvUnstopRegistrationsCount] = useState<number | undefined>(
+    undefined
+  );
+  const [evUnstopViewsCount, setEvUnstopViewsCount] = useState<number | undefined>(undefined);
+  const [evUnstopDeadline, setEvUnstopDeadline] = useState('');
+  const [evUnstopOrganiser, setEvUnstopOrganiser] = useState('');
+  const [evUnstopMode, setEvUnstopMode] = useState('');
+  const [evUnstopPrize, setEvUnstopPrize] = useState('');
+  const [evUnstopSyncedAt, setEvUnstopSyncedAt] = useState('');
+  const [fetchingUnstop, setFetchingUnstop] = useState(false);
+  const [syncingEventId, setSyncingEventId] = useState<string | null>(null);
+  const [togglingAttendanceId, setTogglingAttendanceId] = useState<string | null>(null);
 
   // Announcement form state
   const [annTitle, setAnnTitle] = useState('');
@@ -130,7 +181,25 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
   const [resProblems, setResProblems] = useState(25);
   const [resSummary, setResSummary] = useState('');
   const [resUrl, setResUrl] = useState('https://www.hackerrank.com/domains/algorithms');
+  const [resDocUrl, setResDocUrl] = useState('');
   const [resTopics, setResTopics] = useState('Graphs, Greedy, Complexity');
+
+  const evBannerValidation = useMemo(
+    () => validateDriveOrHttpsUrl(evBannerUrl, { allowEmpty: false, allowRelative: true }),
+    [evBannerUrl]
+  );
+  const evDocValidation = useMemo(
+    () => validateDriveOrHttpsUrl(evDocUrl, { allowEmpty: true }),
+    [evDocUrl]
+  );
+  const galValidation = useMemo(
+    () => validateDriveOrHttpsUrl(galUrl, { allowEmpty: false, allowRelative: true }),
+    [galUrl]
+  );
+  const resDocValidation = useMemo(
+    () => validateDriveOrHttpsUrl(resDocUrl, { allowEmpty: true }),
+    [resDocUrl]
+  );
 
   // Leaderboard form state
   const [lbEditId, setLbEditId] = useState<string | undefined>(undefined);
@@ -186,7 +255,13 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
               id: 'registrations',
               label: 'Registrations',
               icon: ClipboardList,
-              badge: registrations.length,
+              badge: registrations.length + unstopParticipants.length,
+            },
+            {
+              id: 'certificates',
+              label: 'E-Certificates',
+              icon: Award,
+              badge: certificates.length,
             },
             { id: 'announcements', label: 'Announcements', icon: Megaphone },
             { id: 'gallery', label: 'Gallery', icon: ImageIcon },
@@ -219,7 +294,13 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
               id: 'registrations',
               label: 'Registrations',
               icon: ClipboardList,
-              badge: registrations.length,
+              badge: registrations.length + unstopParticipants.length,
+            },
+            {
+              id: 'certificates',
+              label: 'E-Certificates',
+              icon: Award,
+              badge: certificates.length,
             },
           ],
         },
@@ -243,45 +324,150 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
       item: tabClusters[0].items[0],
     };
 
+  const resetEventForm = () => {
+    setEditingEventId(null);
+    setEvTitle('');
+    setEvMode('offline');
+    setEvAttendanceEnabled(false);
+    setEvMeetingUrl('');
+    setEvVenue('CSE Seminar Hall, Paavai Campus');
+    setEvDesc('');
+    setEvBannerUrl(CHAPTER_IMAGES.hackathonArena);
+    setEvDocUrl('');
+    setEvUnstopUrl('');
+    setEvUnstopCompetitionId('');
+    setEvUnstopRegistrationsCount(undefined);
+    setEvUnstopViewsCount(undefined);
+    setEvUnstopDeadline('');
+    setEvUnstopOrganiser('');
+    setEvUnstopMode('');
+    setEvUnstopPrize('');
+    setEvUnstopSyncedAt('');
+  };
+
+  const handleFetchFromUnstop = async () => {
+    if (!evUnstopUrl.trim() || fetchingUnstop) return;
+    setFetchingUnstop(true);
+    const res = await fetchUnstopEventDetails(evUnstopUrl.trim());
+    setFetchingUnstop(false);
+    if (!res.ok || !res.data) return;
+
+    const d = res.data;
+    setEvUnstopUrl(d.unstopUrl);
+    setEvUnstopCompetitionId(d.unstopCompetitionId);
+    setEvUnstopRegistrationsCount(d.unstopRegistrationsCount);
+    setEvUnstopViewsCount(d.unstopViewsCount);
+    setEvUnstopDeadline(d.unstopDeadline || '');
+    setEvUnstopOrganiser(d.unstopOrganiser || '');
+    setEvUnstopMode(d.unstopMode || '');
+    setEvUnstopPrize(d.unstopPrize || '');
+    setEvUnstopSyncedAt(d.unstopSyncedAt);
+
+    if (d.title) setEvTitle(d.title);
+    if (d.category) setEvCategory(d.category);
+    if (d.dateISO) {
+      const dt = new Date(d.dateISO);
+      if (!Number.isNaN(dt.getTime())) {
+        setEvDate(dt.toISOString().slice(0, 16));
+      }
+    }
+    if (d.venue) setEvVenue(d.venue);
+    if (d.description) setEvDesc(d.description);
+    if (d.bannerImage) setEvBannerUrl(d.bannerImage);
+    const inferredMode = getEffectiveEventMode({ unstopMode: d.unstopMode, venue: d.venue });
+    setEvMode(inferredMode);
+    if (inferredMode === 'online') {
+      setEvAttendanceEnabled(false);
+    }
+    if (d.unstopRegistrationsCount > evCapacity) {
+      setEvCapacity(Math.min(5000, Math.max(100, d.unstopRegistrationsCount + 50)));
+    }
+  };
+
   const handleEventSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!evTitle.trim() || !evDesc.trim()) return;
+    if (!evBannerValidation.valid || (evDocUrl.trim() && !evDocValidation.valid)) return;
+    const cleanBanner = evBannerUrl.trim() || CHAPTER_IMAGES.hackathonArena;
+    const cleanDoc = evDocUrl.trim() || undefined;
+    const cleanMeetingUrl = evMode === 'online' || evMode === 'hybrid' ? evMeetingUrl.trim() : '';
+    const resolvedAttendanceEnabled =
+      evMode === 'online' ? (can('canEditDeleteAnyEvent') ? evAttendanceEnabled : false) : true;
+    const cleanUnstopUrl = evUnstopUrl.trim();
+    const unstopFields = {
+      unstopUrl: cleanUnstopUrl,
+      unstopCompetitionId: evUnstopCompetitionId.trim(),
+      ...(evUnstopRegistrationsCount !== undefined
+        ? { unstopRegistrationsCount: evUnstopRegistrationsCount }
+        : {}),
+      ...(evUnstopViewsCount !== undefined ? { unstopViewsCount: evUnstopViewsCount } : {}),
+      unstopDeadline: evUnstopDeadline.trim(),
+      unstopOrganiser: evUnstopOrganiser.trim(),
+      unstopMode: evUnstopMode.trim(),
+      unstopPrize: evUnstopPrize.trim(),
+      unstopSyncedAt: evUnstopSyncedAt.trim(),
+    };
+
     if (editingEventId && can('canEditDeleteAnyEvent')) {
       updateEvent(editingEventId, {
         title: evTitle.trim(),
         category: evCategory,
+        eventMode: evMode,
+        attendanceEnabled: resolvedAttendanceEnabled,
+        meetingUrl: cleanMeetingUrl,
         dateISO: new Date(evDate).toISOString(),
-        venue: evVenue.trim(),
+        venue: evVenue.trim() || (evMode === 'online' ? 'Online (Virtual Session)' : 'Paavai Campus'),
         description: evDesc.trim(),
         capacity: Number(evCapacity) || 100,
         membersOnly: evMembersOnly,
+        bannerImage: cleanBanner,
+        documentUrl: cleanDoc ?? '',
+        ...unstopFields,
       });
-      setEditingEventId(null);
     } else {
       createEvent({
         title: evTitle.trim(),
         category: evCategory,
+        eventMode: evMode,
+        attendanceEnabled: resolvedAttendanceEnabled,
+        ...(cleanMeetingUrl ? { meetingUrl: cleanMeetingUrl } : {}),
         dateISO: new Date(evDate).toISOString(),
-        venue: evVenue.trim(),
+        venue: evVenue.trim() || (evMode === 'online' ? 'Online (Virtual Session)' : 'Paavai Campus'),
         description: evDesc.trim(),
         capacity: Number(evCapacity) || 100,
         membersOnly: evMembersOnly,
-        bannerImage: CHAPTER_IMAGES.hackathonArena,
+        bannerImage: cleanBanner,
+        documentUrl: cleanDoc,
+        ...(cleanUnstopUrl ? unstopFields : {}),
       });
     }
-    setEvTitle('');
-    setEvDesc('');
+    resetEventForm();
   };
 
   const startEditEvent = (ev: CampusEvent) => {
+    const resolvedMode = getEffectiveEventMode(ev);
     setEditingEventId(ev.id);
     setEvTitle(ev.title);
     setEvCategory(ev.category);
+    setEvMode(resolvedMode);
+    setEvAttendanceEnabled(resolvedMode === 'online' ? isOnlineAttendanceEnabled(ev) : true);
+    setEvMeetingUrl(ev.meetingUrl || '');
     setEvDate(ev.dateISO.slice(0, 16));
     setEvVenue(ev.venue);
     setEvDesc(ev.description);
     setEvCapacity(ev.capacity);
     setEvMembersOnly(ev.membersOnly);
+    setEvBannerUrl(ev.bannerImage || CHAPTER_IMAGES.hackathonArena);
+    setEvDocUrl(ev.documentUrl || '');
+    setEvUnstopUrl(ev.unstopUrl || '');
+    setEvUnstopCompetitionId(ev.unstopCompetitionId || '');
+    setEvUnstopRegistrationsCount(ev.unstopRegistrationsCount);
+    setEvUnstopViewsCount(ev.unstopViewsCount);
+    setEvUnstopDeadline(ev.unstopDeadline || '');
+    setEvUnstopOrganiser(ev.unstopOrganiser || '');
+    setEvUnstopMode(ev.unstopMode || '');
+    setEvUnstopPrize(ev.unstopPrize || '');
+    setEvUnstopSyncedAt(ev.unstopSyncedAt || '');
   };
 
   const handleAnnouncementSubmit = (e: React.FormEvent) => {
@@ -298,7 +484,7 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
 
   const handleGallerySubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!galTitle.trim() || !galCaption.trim()) return;
+    if (!galTitle.trim() || !galCaption.trim() || !galValidation.valid) return;
     addGalleryPhoto({
       title: galTitle.trim(),
       category: galCat,
@@ -313,6 +499,7 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
   const handleResourceSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!resTitle.trim() || !resSummary.trim()) return;
+    if (resDocUrl.trim() && !resDocValidation.valid) return;
     addResource({
       title: resTitle.trim(),
       track: resTrack,
@@ -322,6 +509,7 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
       problemCount: Number(resProblems) || 20,
       summary: resSummary.trim(),
       url: resUrl.trim() || 'https://www.hackerrank.com',
+      documentUrl: resDocUrl.trim() || undefined,
       topics: resTopics
         .split(',')
         .map((t) => t.trim())
@@ -329,6 +517,7 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
     });
     setResTitle('');
     setResSummary('');
+    setResDocUrl('');
   };
 
   const handleLeaderboardSubmit = (e: React.FormEvent) => {
@@ -377,8 +566,8 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
           </p>
         </div>
 
-        {/* Summary Metrics */}
-        <div className="flex items-center gap-6 text-xs font-mono shrink-0">
+        {/* Summary Metrics & Admin Export Controls */}
+        <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs font-mono shrink-0">
           <div>
             <p className="text-slate-500 dark:text-slate-400">Approved Events</p>
             <p className="text-lg font-bold tabular-nums text-slate-900 dark:text-white">
@@ -399,10 +588,23 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
               </p>
             </div>
           )}
+          {can('canExportRegistrations') && (
+            <button
+              type="button"
+              onClick={() => {
+                setAttendanceExportEventId('all');
+                setAttendanceExportModalOpen(true);
+              }}
+              className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+            >
+              <Download className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Export Attendance CSV</span>
+            </button>
+          )}
           {isLead && (
             <Link
               to="/debug/emails"
-              className="px-3 py-2 rounded-lg text-xs font-mono font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#121821] text-slate-700 dark:text-slate-200 hover:border-[#00EA64] transition-colors inline-flex items-center gap-1.5"
+              className="px-3 py-2 rounded-lg text-xs font-mono font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#121821] text-slate-700 dark:text-slate-200 hover:border-[#00EA64] transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
             >
               <Mail className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
               <span>Email Debug Logs</span>
@@ -410,6 +612,20 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
           )}
         </div>
       </header>
+
+      {/* Operations Analytics Row: Member Check-In Summary + 6-Month Event Attendance */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-stretch">
+        <div className="xl:col-span-5 flex">
+          <MemberCheckInSummaryWidget
+            isLead={isLead}
+            onOpenCheckIns={() => setActiveTab('checkins')}
+            onOpenMembers={isLead ? () => setActiveTab('members') : undefined}
+          />
+        </div>
+        <div className="xl:col-span-7 flex">
+          <DashboardWidget onOpenCheckIns={() => setActiveTab('checkins')} />
+        </div>
+      </div>
 
       {/* Workspace Canvas: Clustered Left Sidebar + Active Panel */}
       <div className="flex flex-col lg:flex-row items-start gap-6 xl:gap-8">
@@ -570,11 +786,7 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
               {editingEventId && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setEditingEventId(null);
-                    setEvTitle('');
-                    setEvDesc('');
-                  }}
+                  onClick={resetEventForm}
                   className="text-xs text-slate-500 hover:text-slate-900 dark:hover:text-white"
                 >
                   Cancel edit
@@ -586,6 +798,59 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
                 Crew submissions are saved as Pending Approval until approved by the Campus Lead.
               </p>
             )}
+
+            {/* Unstop Event Connection Box */}
+            <div className="p-3.5 rounded-lg border border-sky-500/30 bg-sky-500/5 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <label
+                  htmlFor="event-unstop-url"
+                  className="text-xs font-mono font-semibold text-sky-700 dark:text-sky-300 inline-flex items-center gap-1.5"
+                >
+                  <Link2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Unstop Event Link (Auto-Fetch Details &amp; Registrations)</span>
+                </label>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  id="event-unstop-url"
+                  type="text"
+                  value={evUnstopUrl}
+                  onChange={(e) => setEvUnstopUrl(e.target.value)}
+                  placeholder="https://unstop.com/hackathons/... or Competition ID"
+                  className="flex-1 h-9 px-3 rounded-lg text-xs font-mono bg-white dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+                />
+                <button
+                  type="button"
+                  disabled={!evUnstopUrl.trim() || fetchingUnstop}
+                  onClick={handleFetchFromUnstop}
+                  className="h-9 px-3 rounded-lg text-xs font-mono font-semibold bg-sky-600 text-white hover:bg-sky-500 disabled:opacity-50 inline-flex items-center justify-center gap-1.5 shrink-0"
+                >
+                  {fetchingUnstop ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
+                  )}
+                  <span>{fetchingUnstop ? 'Fetching…' : 'Fetch from Unstop'}</span>
+                </button>
+              </div>
+              {evUnstopSyncedAt && (
+                <div className="text-[11px] font-mono text-slate-600 dark:text-slate-300 flex flex-wrap gap-x-3 gap-y-1 pt-1 border-t border-sky-500/20">
+                  <span className="text-[#009942] dark:text-[#00EA64] font-semibold">
+                    ✓ Synced
+                  </span>
+                  {evUnstopRegistrationsCount !== undefined && (
+                    <span>
+                      Registered: <strong>{evUnstopRegistrationsCount.toLocaleString('en-IN')}</strong>
+                    </span>
+                  )}
+                  {evUnstopViewsCount !== undefined && evUnstopViewsCount > 0 && (
+                    <span>Views: {evUnstopViewsCount.toLocaleString('en-IN')}</span>
+                  )}
+                  {evUnstopMode && <span>Mode: {evUnstopMode}</span>}
+                  {evUnstopPrize && <span>Prize: {evUnstopPrize}</span>}
+                </div>
+              )}
+            </div>
             <div>
               <label className="block text-xs font-mono text-slate-500 dark:text-slate-400 mb-1">
                 Event Title
@@ -631,28 +896,114 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-mono text-slate-500 dark:text-slate-400 mb-1">
-                  Date & Time
+                <label
+                  htmlFor="event-mode-select"
+                  className="block text-xs font-mono text-slate-500 dark:text-slate-400 mb-1"
+                >
+                  Event Mode
                 </label>
-                <input
-                  type="datetime-local"
-                  value={evDate}
-                  onChange={(e) => setEvDate(e.target.value)}
-                  className="w-full h-10 px-3 rounded-lg text-xs font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
-                />
+                <select
+                  id="event-mode-select"
+                  value={evMode}
+                  onChange={(e) => {
+                    const nextMode = e.target.value as EventMode;
+                    setEvMode(nextMode);
+                    if (nextMode === 'online') {
+                      if (evVenue === 'CSE Seminar Hall, Paavai Campus' || !evVenue.trim()) {
+                        setEvVenue('Online (Virtual Session)');
+                      }
+                      if (!editingEventId) setEvAttendanceEnabled(false);
+                    } else if (evVenue === 'Online (Virtual Session)') {
+                      setEvVenue('CSE Seminar Hall, Paavai Campus');
+                    }
+                  }}
+                  className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+                >
+                  <option value="offline">In-Person (Offline · QR Check-In)</option>
+                  <option value="online">Online (No QR Check-In)</option>
+                  <option value="hybrid">Hybrid (In-Person + Online)</option>
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-mono text-slate-500 dark:text-slate-400 mb-1">
-                  Venue
+                  {evMode === 'online' ? 'Platform / Virtual Venue' : 'Venue'}
                 </label>
                 <input
                   type="text"
                   value={evVenue}
                   onChange={(e) => setEvVenue(e.target.value)}
+                  placeholder={
+                    evMode === 'online'
+                      ? 'e.g., Google Meet / HackerRank Contest Room'
+                      : 'CSE Seminar Hall, Paavai Campus'
+                  }
                   className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
                 />
               </div>
             </div>
+
+            <div>
+              <label className="block text-xs font-mono text-slate-500 dark:text-slate-400 mb-1">
+                Date &amp; Time
+              </label>
+              <input
+                type="datetime-local"
+                value={evDate}
+                onChange={(e) => setEvDate(e.target.value)}
+                className="w-full h-10 px-3 rounded-lg text-xs font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+              />
+            </div>
+
+            {(evMode === 'online' || evMode === 'hybrid') && (
+              <div className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-[#0B0F14] space-y-3">
+                <div>
+                  <label
+                    htmlFor="event-meeting-url"
+                    className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1"
+                  >
+                    Online Session / Contest Link (optional)
+                  </label>
+                  <input
+                    id="event-meeting-url"
+                    type="url"
+                    value={evMeetingUrl}
+                    onChange={(e) => setEvMeetingUrl(e.target.value)}
+                    placeholder="https://meet.google.com/... or https://www.hackerrank.com/..."
+                    className="w-full h-9 px-3 rounded-lg text-xs font-mono bg-white dark:bg-[#121821] border border-slate-300 dark:border-slate-700"
+                  />
+                </div>
+
+                {evMode === 'online' && (
+                  <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
+                    {can('canEditDeleteAnyEvent') ? (
+                      <label className="flex items-start gap-2.5 text-xs text-slate-800 dark:text-slate-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={evAttendanceEnabled}
+                          onChange={(e) => setEvAttendanceEnabled(e.target.checked)}
+                          className="mt-0.5 rounded accent-[#00EA64]"
+                        />
+                        <span>
+                          <strong className="font-semibold block">
+                            Enable online attendance for participants
+                          </strong>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                            QR check-in is disabled for online events. Turn this on if you want
+                            registered participants to mark their attendance on the event page.
+                          </span>
+                        </span>
+                      </label>
+                    ) : (
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                        QR check-in is automatically disabled for online events. If attendance
+                        tracking is needed, the Campus Lead / Admin can enable participant
+                        attendance anytime.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             <div>
               <label className="block text-xs font-mono text-slate-500 dark:text-slate-400 mb-1">
                 Description
@@ -665,6 +1016,66 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
                 placeholder="Outline contest format, prerequisites, and rewards..."
                 className="w-full p-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
               />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <label className="block text-xs font-mono text-slate-500 dark:text-slate-400">
+                  Event Poster / Banner (Google Drive or Direct URL)
+                </label>
+                {evBannerUrl.trim() && evBannerValidation.valid && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-[#00EA64]/15 text-[#009942] dark:text-[#00EA64]">
+                    <CheckCircle2 className="w-3 h-3" aria-hidden="true" />
+                    <span>{evBannerValidation.isDrive ? 'Drive Banner Ready' : 'Banner Ready'}</span>
+                  </span>
+                )}
+              </div>
+              <input
+                type="text"
+                value={evBannerUrl}
+                onChange={(e) => setEvBannerUrl(e.target.value)}
+                placeholder="https://drive.google.com/file/d/.../view"
+                className="w-full h-10 px-3 rounded-lg text-xs font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+              />
+              <p className="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-1">
+                {evBannerValidation.valid ? evBannerValidation.hint : evBannerValidation.error}
+              </p>
+              {evBannerUrl.trim() && evBannerValidation.valid && (
+                <div className="mt-2 h-24 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-900">
+                  <SafeImage
+                    src={evBannerUrl.trim()}
+                    alt="Event banner preview"
+                    className="w-full h-full object-cover"
+                    fallbackTitle="Banner Preview"
+                  />
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <label className="block text-xs font-mono text-slate-500 dark:text-slate-400">
+                  Event Brochure / Schedule Document (optional Google Drive PDF/Docs/Slides)
+                </label>
+                {evDocUrl.trim() && evDocValidation.valid && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-[#00EA64]/15 text-[#009942] dark:text-[#00EA64]">
+                    <CheckCircle2 className="w-3 h-3" aria-hidden="true" />
+                    <span>Doc Ready</span>
+                  </span>
+                )}
+              </div>
+              <input
+                type="url"
+                value={evDocUrl}
+                onChange={(e) => setEvDocUrl(e.target.value)}
+                placeholder="https://drive.google.com/file/d/.../view"
+                className="w-full h-10 px-3 rounded-lg text-xs font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+              />
+              <p className="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-1">
+                {evDocUrl.trim()
+                  ? evDocValidation.valid
+                    ? evDocValidation.hint
+                    : evDocValidation.error
+                  : DRIVE_SHARING_HINT}
+              </p>
             </div>
             <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
               <input
@@ -700,42 +1111,182 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
                   No events created yet. Use the form to publish a new campus event.
                 </p>
               ) : (
-                events.map((ev) => (
+                events.map((ev) => {
+                  const evEffectiveMode = getEffectiveEventMode(ev);
+                  const onlineEv = evEffectiveMode === 'online';
+                  const onlineAttOn = isOnlineAttendanceEnabled(ev);
+                  return (
                   <div key={ev.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="min-w-0 space-y-1">
-                      <p className="font-mono text-sm font-bold text-slate-900 dark:text-white truncate">
+                      <Link
+                        to={`/events/${encodeURIComponent(ev.id)}`}
+                        className="font-mono text-sm font-bold text-slate-900 dark:text-white hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors truncate block"
+                      >
                         {ev.title}
-                      </p>
+                      </Link>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        {ev.category} · {new Date(ev.dateISO).toLocaleDateString('en-IN')} · By{' '}
+                        {ev.category} ·{' '}
+                        <span className="font-mono text-slate-700 dark:text-slate-300">
+                          {onlineEv ? 'Online' : evEffectiveMode === 'hybrid' ? 'Hybrid' : 'In-Person'}
+                        </span>
+                        {onlineEv && (
+                          <>
+                            {' '}·{' '}
+                            <span
+                              className={`font-mono ${
+                                onlineAttOn
+                                  ? 'text-[#009942] dark:text-[#00EA64] font-semibold'
+                                  : 'text-slate-500 dark:text-slate-400'
+                              }`}
+                            >
+                              {onlineAttOn ? 'Online Attendance On' : 'No QR Check-In'}
+                            </span>
+                          </>
+                        )}{' '}
+                        · {new Date(ev.dateISO).toLocaleDateString('en-IN')} · By{' '}
                         {ev.createdByName} ·{' '}
                         <span className={`font-mono font-semibold capitalize ${statusTextClass(ev.status)}`}>
                           {ev.status}
                         </span>
                       </p>
+                      {ev.unstopUrl && (
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-mono text-sky-700 dark:text-sky-300">
+                          <span>
+                            Unstop Linked
+                            {ev.unstopRegistrationsCount !== undefined
+                              ? ` · ${ev.unstopRegistrationsCount.toLocaleString('en-IN')} registered`
+                              : ''}
+                          </span>
+                          {ev.unstopMode && <span>· {ev.unstopMode}</span>}
+                          <a
+                            href={ev.unstopUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 hover:underline"
+                          >
+                            <span>Open</span>
+                            <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                          </a>
+                        </div>
+                      )}
                     </div>
-                    {can('canEditDeleteAnyEvent') && (
-                      <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {onlineEv && can('canEditDeleteAnyEvent') && (
                         <button
                           type="button"
-                          onClick={() => startEditEvent(ev)}
-                          aria-label={`Edit ${ev.title}`}
-                          className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-[#00EA64]"
+                          disabled={togglingAttendanceId === ev.id}
+                          onClick={async () => {
+                            setTogglingAttendanceId(ev.id);
+                            await toggleOnlineEventAttendance(ev.id, !onlineAttOn);
+                            setTogglingAttendanceId(null);
+                          }}
+                          title={
+                            onlineAttOn
+                              ? 'Disable participant attendance marking for this online event'
+                              : 'Enable participant attendance marking for this online event'
+                          }
+                          className={`px-2.5 py-1.5 rounded-md border text-[11px] font-mono inline-flex items-center gap-1 whitespace-nowrap shrink-0 disabled:opacity-50 transition-colors ${
+                            onlineAttOn
+                              ? 'border-[#00EA64]/60 bg-[#00EA64]/15 text-[#009942] dark:text-[#00EA64] hover:bg-[#00EA64]/25 font-semibold'
+                              : 'border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#00EA64]'
+                          }`}
                         >
-                          <Edit3 className="w-3.5 h-3.5" />
+                          {onlineAttOn ? (
+                            <UserCheck className="w-3 h-3" aria-hidden="true" />
+                          ) : (
+                            <Globe className="w-3 h-3" aria-hidden="true" />
+                          )}
+                          <span>
+                            {togglingAttendanceId === ev.id
+                              ? 'Saving…'
+                              : onlineAttOn
+                              ? 'Attendance: On'
+                              : 'Enable Attendance'}
+                          </span>
                         </button>
+                      )}
+                      <Link
+                        to={`/events/${encodeURIComponent(ev.id)}`}
+                        title="Open dedicated Event Page"
+                        className="px-2.5 py-1.5 rounded-md border border-[#00EA64]/45 bg-[#00EA64]/10 text-[#009942] dark:text-[#00EA64] hover:bg-[#00EA64]/20 text-[11px] font-mono inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+                      >
+                        <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                        <span>Event Page</span>
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          printEventNaacReport({
+                            event: ev,
+                            registrations,
+                            checkIns: eventCheckIns,
+                            certificates,
+                            siteSettings,
+                          })
+                        }
+                        title="Print NAAC / IQAC Activity & Verified Attendance Report"
+                        className="px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#00EA64] hover:text-[#009942] dark:hover:text-[#00EA64] text-[11px] font-mono inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+                      >
+                        <FileText className="w-3 h-3" aria-hidden="true" />
+                        <span>NAAC Report</span>
+                      </button>
+                      {can('canExportRegistrations') && (
                         <button
                           type="button"
-                          onClick={() => deleteEvent(ev.id)}
-                          aria-label={`Delete ${ev.title}`}
-                          className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-red-500 hover:border-red-500/50"
+                          onClick={() => {
+                            setAttendanceExportEventId(ev.id);
+                            setAttendanceExportModalOpen(true);
+                          }}
+                          title="Export attendance data for this event as CSV"
+                          className="px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#00EA64] hover:text-[#009942] dark:hover:text-[#00EA64] text-[11px] font-mono inline-flex items-center gap-1 whitespace-nowrap shrink-0"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Download className="w-3 h-3" aria-hidden="true" />
+                          <span>Attendance CSV</span>
                         </button>
-                      </div>
-                    )}
+                      )}
+                      {ev.unstopUrl && (
+                        <button
+                          type="button"
+                          disabled={syncingEventId === ev.id}
+                          onClick={async () => {
+                            setSyncingEventId(ev.id);
+                            await syncEventFromUnstop(ev.id);
+                            setSyncingEventId(null);
+                          }}
+                          title="Refresh live registrations & event details from Unstop"
+                          className="px-2.5 py-1.5 rounded-md border border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300 hover:bg-sky-500/20 disabled:opacity-50 text-[11px] font-mono inline-flex items-center gap-1"
+                        >
+                          <RefreshCw
+                            className={`w-3 h-3 ${syncingEventId === ev.id ? 'animate-spin' : ''}`}
+                            aria-hidden="true"
+                          />
+                          <span>{syncingEventId === ev.id ? 'Syncing…' : 'Sync Unstop'}</span>
+                        </button>
+                      )}
+                      {can('canEditDeleteAnyEvent') && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => startEditEvent(ev)}
+                            aria-label={`Edit ${ev.title}`}
+                            className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-[#00EA64]"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteEvent(ev.id)}
+                            aria-label={`Delete ${ev.title}`}
+                            className="p-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-red-500 hover:border-red-500/50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -887,16 +1438,38 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
               </select>
             </div>
             <div>
-              <label className="block text-xs font-mono text-slate-500 dark:text-slate-400 mb-1">
-                Image URL
-              </label>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <label className="block text-xs font-mono text-slate-500 dark:text-slate-400">
+                  Google Drive Image Link or Direct URL
+                </label>
+                {galUrl.trim() && galValidation.valid && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-[#00EA64]/15 text-[#009942] dark:text-[#00EA64]">
+                    <CheckCircle2 className="w-3 h-3" aria-hidden="true" />
+                    <span>{galValidation.isDrive ? 'Drive Photo Ready' : 'Photo Ready'}</span>
+                  </span>
+                )}
+              </div>
               <input
                 type="text"
                 required
                 value={galUrl}
                 onChange={(e) => setGalUrl(e.target.value)}
+                placeholder="https://drive.google.com/file/d/.../view"
                 className="w-full h-10 px-3 rounded-lg text-xs font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
               />
+              <p className="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-1">
+                {galValidation.valid ? galValidation.hint : galValidation.error}
+              </p>
+              {galUrl.trim() && galValidation.valid && (
+                <div className="mt-2 h-24 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-900">
+                  <SafeImage
+                    src={galUrl.trim()}
+                    alt="Gallery photo preview"
+                    className="w-full h-full object-cover"
+                    fallbackTitle="Preview"
+                  />
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-xs font-mono text-slate-500 dark:text-slate-400 mb-1">
@@ -1080,6 +1653,33 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
                 onChange={(e) => setResUrl(e.target.value)}
                 className="w-full h-10 px-3 rounded-lg text-xs font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
               />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <label className="block text-xs font-mono text-slate-500 dark:text-slate-400">
+                  Study Guide / Notes Document (optional Google Drive PDF/Docs/Slides)
+                </label>
+                {resDocUrl.trim() && resDocValidation.valid && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-[#00EA64]/15 text-[#009942] dark:text-[#00EA64]">
+                    <CheckCircle2 className="w-3 h-3" aria-hidden="true" />
+                    <span>Drive Doc Ready</span>
+                  </span>
+                )}
+              </div>
+              <input
+                type="url"
+                value={resDocUrl}
+                onChange={(e) => setResDocUrl(e.target.value)}
+                placeholder="https://drive.google.com/file/d/.../view"
+                className="w-full h-10 px-3 rounded-lg text-xs font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+              />
+              <p className="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-1">
+                {resDocUrl.trim()
+                  ? resDocValidation.valid
+                    ? resDocValidation.hint
+                    : resDocValidation.error
+                  : DRIVE_SHARING_HINT}
+              </p>
             </div>
             <button
               type="submit"
@@ -1319,16 +1919,29 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
                   : 'Crew access: view-only attendee roster. CSV export is restricted to the Campus Lead.'}
               </p>
             </div>
-            {/* Export CSV Button — Hidden for Crew, Visible ONLY to Lead */}
+            {/* Export CSV Buttons — Hidden for Crew, Visible ONLY to Lead / Admin */}
             {can('canExportRegistrations') && (
-              <button
-                type="button"
-                onClick={exportRegistrationsCSV}
-                className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 self-start sm:self-auto"
-              >
-                <Download className="w-4 h-4" aria-hidden="true" />
-                <span>Export CSV</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAttendanceExportEventId('all');
+                    setAttendanceExportModalOpen(true);
+                  }}
+                  className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                >
+                  <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Export Attendance CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={exportRegistrationsCSV}
+                  className="px-3.5 py-2 rounded-lg text-xs font-mono border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#00EA64] inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                >
+                  <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Export Registrations CSV</span>
+                </button>
+              </div>
             )}
           </div>
 
@@ -1340,19 +1953,23 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
                   <th className="py-3 px-4">Register No.</th>
                   <th className="py-3 px-4">Dept & Year</th>
                   <th className="py-3 px-4">Event</th>
+                  <th className="py-3 px-4">Entry Pass QR</th>
                   <th className="py-3 px-4 text-right">Registered At</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                 {registrations.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-10 px-4 text-center text-xs text-slate-500 dark:text-slate-400">
+                    <td colSpan={6} className="py-10 px-4 text-center text-xs text-slate-500 dark:text-slate-400">
                       No event registrations recorded yet.
                     </td>
                   </tr>
                 ) : (
                   registrations.map((reg) => {
                     const ev = events.find((e) => e.id === reg.eventId);
+                    const onlineEv = isOnlineEvent(ev);
+                    const ticketCode =
+                      reg.ticketCode || buildAttendeeTicketCode(reg.eventId, reg.userId);
                     return (
                       <tr key={reg.id}>
                         <td className="py-3 px-4">
@@ -1366,6 +1983,39 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
                         <td className="py-3 px-4 text-xs font-medium text-slate-800 dark:text-slate-200">
                           {ev?.title ?? reg.eventId}
                         </td>
+                        <td className="py-3 px-4">
+                          {onlineEv ? (
+                            <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                              Online · No QR
+                            </span>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                                {ticketCode}
+                              </span>
+                              <button
+                                type="button"
+                                disabled={resendingTicketRegId === reg.id}
+                                onClick={async () => {
+                                  setResendingTicketRegId(reg.id);
+                                  await resendEventTicketEmail(reg.id);
+                                  setResendingTicketRegId(null);
+                                }}
+                                title="Email unique Entry Pass QR to student"
+                                className="px-2 py-1 rounded border border-slate-300 dark:border-slate-700 text-[10px] font-mono text-slate-700 dark:text-slate-300 hover:border-[#00EA64] disabled:opacity-50 inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+                              >
+                                <Mail className="w-3 h-3" aria-hidden="true" />
+                                <span>
+                                  {resendingTicketRegId === reg.id
+                                    ? 'Sending…'
+                                    : reg.ticketEmailStatus === 'sent'
+                                    ? 'Resend QR'
+                                    : 'Send QR'}
+                                </span>
+                              </button>
+                            </div>
+                          )}
+                        </td>
                         <td className="py-3 px-4 text-right font-mono text-xs tabular-nums text-slate-500">
                           {reg.registeredAt}
                         </td>
@@ -1376,11 +2026,16 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
               </tbody>
             </table>
           </div>
+
+          <UnstopCsvImporterPanel />
         </div>
       )}
 
       {/* TAB: QR CHECK-INS (Crew & Lead) */}
       {activeTab === 'checkins' && <EventCheckInQRGenerator />}
+
+      {/* TAB: VERIFIABLE E-CERTIFICATES (Crew & Lead) */}
+      {activeTab === 'certificates' && <CertificatesManagerPanel />}
 
       {/* TAB 7: PENDING APPROVALS (Campus Lead ONLY) */}
       {activeTab === 'approvals' && isLead && (
@@ -1406,7 +2061,12 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
                         {new Date(ev.dateISO).toLocaleDateString('en-IN')}
                       </p>
                       <h3 className="font-mono text-base font-bold text-slate-900 dark:text-white">
-                        {ev.title}
+                        <Link
+                          to={`/events/${encodeURIComponent(ev.id)}`}
+                          className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors"
+                        >
+                          {ev.title}
+                        </Link>
                       </h3>
                       <p className="text-sm text-slate-600 dark:text-slate-300">{ev.description}</p>
                     </div>
@@ -1491,6 +2151,14 @@ export const CrewDashboardPage: React.FC<{ mode?: 'lead' | 'crew' }> = ({ mode }
       {activeTab === 'settings' && isLead && <SiteSettingsPanel />}
         </div>
       </div>
+
+      {can('canExportRegistrations') && (
+        <AttendanceCsvExportModal
+          open={attendanceExportModalOpen}
+          initialEventId={attendanceExportEventId}
+          onClose={() => setAttendanceExportModalOpen(false)}
+        />
+      )}
     </div>
   );
 };

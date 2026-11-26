@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRight,
@@ -6,6 +6,7 @@ import {
   Calendar,
   CheckCircle2,
   Megaphone,
+  RefreshCw,
   Trophy,
   User as UserIcon,
 } from 'lucide-react';
@@ -22,11 +23,33 @@ export const MemberDashboardPage: React.FC = () => {
     announcements,
     resources,
     registrations,
+    leaderboard,
     completedResourceIds,
     codingActivities,
     toggleResourceCompleted,
     cancelRegistration,
+    syncHackerRankPractice,
   } = useApp();
+
+  const [syncingHr, setSyncingHr] = useState(false);
+  const [syncMessage, setSyncMessage] = useState('');
+
+  const myLeaderboardStanding = useMemo(() => {
+    if (!currentUser) return null;
+    const handleLower = (currentUser.hackerRankHandle || '').trim().toLowerCase().replace(/^@/, '');
+    const idx = leaderboard.findIndex(
+      (entry) =>
+        entry.uid === currentUser.id ||
+        entry.id === currentUser.id ||
+        (handleLower && entry.hackerRankHandle.trim().toLowerCase().replace(/^@/, '') === handleLower)
+    );
+    if (idx < 0) return null;
+    return {
+      rank: idx + 1,
+      score: leaderboard[idx].score,
+      solved: leaderboard[idx].solvedCount ?? leaderboard[idx].problemsSolved,
+    };
+  }, [currentUser, leaderboard]);
 
   if (!currentUser) return null;
 
@@ -114,20 +137,55 @@ export const MemberDashboardPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] space-y-1">
-          <p className="text-xs font-mono text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-            <Trophy className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" />
-            <span>HackerRank Handle</span>
-          </p>
+        <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-mono text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <Trophy className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" />
+              <span>HackerRank Practice</span>
+            </p>
+            {myLeaderboardStanding && (
+              <span className="font-mono text-xs font-bold text-[#009942] dark:text-[#00EA64] tabular-nums">
+                Rank #{myLeaderboardStanding.rank} · {myLeaderboardStanding.score} pts
+              </span>
+            )}
+          </div>
           <p className="font-mono text-xl font-bold text-slate-900 dark:text-white truncate">
             {currentUser.hackerRankHandle || '@paavai_coder'}
           </p>
-          <Link
-            to="/leaderboard"
-            className="text-xs font-mono text-[#009942] dark:text-[#00EA64] hover:underline inline-block"
-          >
-            View full leaderboard →
-          </Link>
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+            <button
+              type="button"
+              disabled={syncingHr}
+              onClick={async () => {
+                setSyncingHr(true);
+                setSyncMessage('');
+                const res = await syncHackerRankPractice();
+                setSyncingHr(false);
+                if (res.ok) {
+                  setSyncMessage(
+                    res.delta && res.delta > 0
+                      ? `+${res.delta} solved synced (+${res.delta * 10} pts)`
+                      : `Synced (${res.totalSolved ?? 0} solved)`
+                  );
+                } else if (res.corsBlocked) {
+                  setSyncMessage('Open Profile heatmap to enter manual count.');
+                }
+              }}
+              className="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold border border-[#00EA64]/45 bg-[#00EA64]/10 text-[#009942] dark:text-[#00EA64] hover:bg-[#00EA64]/20 disabled:opacity-60 inline-flex items-center gap-1 transition-colors"
+            >
+              <RefreshCw className={`w-3 h-3 ${syncingHr ? 'animate-spin' : ''}`} aria-hidden="true" />
+              <span>{syncingHr ? 'Syncing…' : 'Sync Practice'}</span>
+            </button>
+            <Link
+              to="/leaderboard"
+              className="text-xs font-mono text-[#009942] dark:text-[#00EA64] hover:underline"
+            >
+              Leaderboard →
+            </Link>
+          </div>
+          {syncMessage && (
+            <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400">{syncMessage}</p>
+          )}
         </div>
       </section>
 

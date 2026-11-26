@@ -88,12 +88,16 @@ service cloud.firestore {
       return val is string && val.size() <= 500 && (val == '' || val.matches('^https?://.+') || val.matches('^/src/.+'));
     }
 
+    function isValidOptionalDocUrl(val) {
+      return val is string && val.size() <= 500 && (val == '' || val.matches('^https?://.+'));
+    }
+
     // ------------------------------------------------------------------------
     // ENTITY VALIDATION BLUEPRINTS
     // ------------------------------------------------------------------------
     function isValidUserProfile(data) {
       return data.keys().hasAll(['uid', 'email', 'name', 'regNo', 'department', 'year', 'role'])
-        && data.keys().hasOnly(['uid', 'email', 'collegeEmail', 'name', 'regNo', 'department', 'year', 'role', 'emailVerified', 'phone', 'photoUrl', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'joinedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'collegeEmail', 'name', 'regNo', 'department', 'year', 'role', 'emailVerified', 'phone', 'photoUrl', 'documentUrl', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'joinedAt', 'createdAt', 'updatedAt'])
         && isValidId(data.uid)
         && isValidEmail(data.email)
         && (!('collegeEmail' in data) || data.collegeEmail == '' || isValidEmail(data.collegeEmail))
@@ -105,6 +109,7 @@ service cloud.firestore {
         && (!('emailVerified' in data) || data.emailVerified is bool)
         && (!('phone' in data) || (data.phone is string && data.phone.size() <= 20))
         && (!('photoUrl' in data) || isValidOptionalPhotoUrl(data.photoUrl))
+        && (!('documentUrl' in data) || isValidOptionalDocUrl(data.documentUrl))
         && (!('hackerRankHandle' in data) || (data.hackerRankHandle is string && data.hackerRankHandle.size() <= 60))
         && (!('hackerRankUrl' in data) || (data.hackerRankUrl is string && data.hackerRankUrl.size() <= 300))
         && (!('githubUrl' in data) || (data.githubUrl is string && data.githubUrl.size() <= 300))
@@ -118,9 +123,21 @@ service cloud.firestore {
 
     function isValidCampusEvent(data) {
       return data.keys().hasAll(['title', 'category', 'dateISO', 'venue', 'description', 'membersOnly', 'capacity', 'status', 'createdByUid', 'createdByName', 'createdByRole', 'bannerImage'])
-        && data.keys().hasOnly(['title', 'category', 'dateISO', 'venue', 'description', 'membersOnly', 'capacity', 'status', 'createdByUid', 'createdByName', 'createdByRole', 'bannerImage', 'updatedAt'])
+        && data.keys().hasOnly([
+          'title', 'category', 'eventMode', 'attendanceEnabled', 'meetingUrl',
+          'dateISO', 'venue', 'description', 'membersOnly',
+          'capacity', 'status', 'createdByUid', 'createdByName', 'createdByRole',
+          'bannerImage', 'documentUrl',
+          'unstopUrl', 'unstopCompetitionId', 'unstopRegistrationsCount',
+          'unstopViewsCount', 'unstopDeadline', 'unstopOrganiser',
+          'unstopMode', 'unstopPrize', 'unstopSyncedAt',
+          'updatedAt'
+        ])
         && data.title is string && data.title.size() >= 3 && data.title.size() <= 140
         && data.category in ['Contest', 'Workshop', 'Hackathon', 'Bootcamp']
+        && (!('eventMode' in data) || data.eventMode in ['offline', 'online', 'hybrid'])
+        && (!('attendanceEnabled' in data) || data.attendanceEnabled is bool)
+        && (!('meetingUrl' in data) || isValidOptionalDocUrl(data.meetingUrl))
         && data.dateISO is string && data.dateISO.size() >= 10 && data.dateISO.size() <= 40
         && data.venue is string && data.venue.size() >= 2 && data.venue.size() <= 160
         && data.description is string && data.description.size() >= 5 && data.description.size() <= 1000
@@ -130,7 +147,18 @@ service cloud.firestore {
         && isValidId(data.createdByUid)
         && data.createdByName is string && data.createdByName.size() >= 2 && data.createdByName.size() <= 100
         && data.createdByRole in ['lead', 'crew', 'member', 'outsider']
-        && data.bannerImage is string && data.bannerImage.size() >= 1 && data.bannerImage.size() <= 500;
+        && data.bannerImage is string && data.bannerImage.size() >= 1 && data.bannerImage.size() <= 500
+        && (!('documentUrl' in data) || isValidOptionalDocUrl(data.documentUrl))
+        && (!('unstopUrl' in data) || (data.unstopUrl is string && data.unstopUrl.size() <= 500 && (data.unstopUrl == '' || data.unstopUrl.matches('^https://(www\\.)?unstop\\.com/.*$'))))
+        && (!('unstopCompetitionId' in data) || (data.unstopCompetitionId is string && data.unstopCompetitionId.size() <= 40))
+        && (!('unstopRegistrationsCount' in data) || (data.unstopRegistrationsCount is number && data.unstopRegistrationsCount >= 0 && data.unstopRegistrationsCount <= 1000000))
+        && (!('unstopViewsCount' in data) || (data.unstopViewsCount is number && data.unstopViewsCount >= 0 && data.unstopViewsCount <= 10000000))
+        && (!('unstopDeadline' in data) || (data.unstopDeadline is string && data.unstopDeadline.size() <= 60))
+        && (!('unstopOrganiser' in data) || (data.unstopOrganiser is string && data.unstopOrganiser.size() <= 140))
+        && (!('unstopMode' in data) || (data.unstopMode is string && data.unstopMode.size() <= 60))
+        && (!('unstopPrize' in data) || (data.unstopPrize is string && data.unstopPrize.size() <= 140))
+        && (!('unstopSyncedAt' in data) || data.unstopSyncedAt == '' || isValidTimestampStr(data.unstopSyncedAt))
+        && (!('updatedAt' in data) || isValidTimestampStr(data.updatedAt));
     }
 
     function isValidAnnouncement(data) {
@@ -147,19 +175,45 @@ service cloud.firestore {
 
     function isValidLeaderboardEntry(data) {
       return data.keys().hasAll(['name', 'registerNumber', 'department', 'year', 'score', 'problemsSolved', 'hackerRankHandle'])
-        && data.keys().hasOnly(['name', 'registerNumber', 'department', 'year', 'score', 'problemsSolved', 'hackerRankHandle', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'name', 'registerNumber', 'department', 'year', 'score', 'problemsSolved', 'solvedCount', 'eventsAttended', 'rank', 'hackerRankHandle', 'updatedAt'])
+        && (!('uid' in data) || data.uid == '' || isValidId(data.uid))
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 100
         && isValidRegNo(data.registerNumber)
         && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
         && data.year is string && data.year.size() >= 2 && data.year.size() <= 20
         && data.score is number && data.score >= 0 && data.score <= 1000000
         && data.problemsSolved is number && data.problemsSolved >= 0 && data.problemsSolved <= 50000
-        && data.hackerRankHandle is string && data.hackerRankHandle.size() >= 1 && data.hackerRankHandle.size() <= 60;
+        && (!('solvedCount' in data) || (data.solvedCount is number && data.solvedCount >= 0 && data.solvedCount <= 50000))
+        && (!('eventsAttended' in data) || (data.eventsAttended is number && data.eventsAttended >= 0 && data.eventsAttended <= 1000))
+        && (!('rank' in data) || (data.rank is number && data.rank >= 1 && data.rank <= 50000))
+        && data.hackerRankHandle is string && data.hackerRankHandle.size() >= 1 && data.hackerRankHandle.size() <= 60
+        && (!('updatedAt' in data) || isValidTimestampStr(data.updatedAt));
+    }
+
+    function isValidSelfLeaderboardCreate(data) {
+      return isValidLeaderboardEntry(data)
+        && ('uid' in data) && data.uid == request.auth.uid
+        && data.score <= 200
+        && data.problemsSolved <= 20
+        && (!('solvedCount' in data) || data.solvedCount <= 20)
+        && (!('eventsAttended' in data) || data.eventsAttended <= 1);
+    }
+
+    function isValidSelfLeaderboardUpdate(data, prev) {
+      return isValidLeaderboardEntry(data)
+        && ('uid' in data) && data.uid == request.auth.uid
+        && (!('uid' in prev) || prev.uid == '' || prev.uid == request.auth.uid)
+        && data.score >= prev.score
+        && data.score <= prev.score + 200
+        && data.problemsSolved >= prev.problemsSolved
+        && data.problemsSolved <= prev.problemsSolved + 20
+        && (!('solvedCount' in data) || data.solvedCount <= prev.problemsSolved + 20)
+        && (!('eventsAttended' in data) || !('eventsAttended' in prev) || (data.eventsAttended >= prev.eventsAttended && data.eventsAttended <= prev.eventsAttended + 1));
     }
 
     function isValidLearningResource(data) {
       return data.keys().hasAll(['title', 'track', 'level', 'access', 'estimatedHours', 'problemCount', 'summary', 'url', 'topics'])
-        && data.keys().hasOnly(['title', 'track', 'level', 'access', 'estimatedHours', 'problemCount', 'summary', 'url', 'topics'])
+        && data.keys().hasOnly(['title', 'track', 'level', 'access', 'estimatedHours', 'problemCount', 'summary', 'url', 'documentUrl', 'topics'])
         && data.title is string && data.title.size() >= 3 && data.title.size() <= 140
         && data.track in ['DSA', 'Python', 'Java', 'SQL', 'Problem Solving']
         && data.level in ['Beginner', 'Intermediate', 'Advanced']
@@ -168,6 +222,7 @@ service cloud.firestore {
         && data.problemCount is number && data.problemCount >= 1 && data.problemCount <= 2000
         && data.summary is string && data.summary.size() >= 5 && data.summary.size() <= 600
         && data.url is string && data.url.size() >= 8 && data.url.size() <= 500
+        && (!('documentUrl' in data) || isValidOptionalDocUrl(data.documentUrl))
         && data.topics is list && data.topics.size() >= 1 && data.topics.size() <= 10 && data.topics[0] is string;
     }
 
@@ -185,7 +240,10 @@ service cloud.firestore {
 
     function isValidRegistration(data) {
       return data.keys().hasAll(['eventId', 'userId', 'userName', 'userEmail', 'registerNumber', 'department', 'year', 'registeredAt'])
-        && data.keys().hasOnly(['eventId', 'userId', 'userName', 'userEmail', 'registerNumber', 'department', 'year', 'registeredAt'])
+        && data.keys().hasOnly([
+          'eventId', 'userId', 'userName', 'userEmail', 'registerNumber', 'department', 'year', 'registeredAt',
+          'ticketCode', 'ticketEmailStatus', 'ticketEmailSentAt'
+        ])
         && isValidId(data.eventId)
         && isValidId(data.userId)
         && data.userName is string && data.userName.size() >= 2 && data.userName.size() <= 100
@@ -193,12 +251,18 @@ service cloud.firestore {
         && isValidRegNo(data.registerNumber)
         && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
         && data.year is string && data.year.size() >= 2 && data.year.size() <= 20
-        && data.registeredAt is string && data.registeredAt.size() >= 8 && data.registeredAt.size() <= 40;
+        && data.registeredAt is string && data.registeredAt.size() >= 8 && data.registeredAt.size() <= 40
+        && (!('ticketCode' in data) || (data.ticketCode is string && data.ticketCode.size() >= 6 && data.ticketCode.size() <= 64 && data.ticketCode.matches('^[a-zA-Z0-9_\\-]+$')))
+        && (!('ticketEmailStatus' in data) || data.ticketEmailStatus in ['sent', 'queued', 'failed'])
+        && (!('ticketEmailSentAt' in data) || data.ticketEmailSentAt == '' || isValidTimestampStr(data.ticketEmailSentAt));
     }
 
     function isValidJoinRequest(data) {
       return data.keys().hasAll(['name', 'registerNumber', 'department', 'year', 'email', 'phone', 'skills', 'submittedAt', 'status'])
-        && data.keys().hasOnly(['name', 'registerNumber', 'department', 'year', 'email', 'phone', 'skills', 'submittedAt', 'status'])
+        && data.keys().hasOnly([
+          'name', 'registerNumber', 'department', 'year', 'email', 'phone', 'skills', 'submittedAt', 'status',
+          'reviewedAt', 'reviewedByUid', 'reviewNote', 'emailNotificationStatus', 'emailSentAt', 'emailError'
+        ])
         && data.name is string && data.name.size() >= 3 && data.name.size() <= 100
         && isValidRegNo(data.registerNumber)
         && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
@@ -207,16 +271,37 @@ service cloud.firestore {
         && data.phone is string && data.phone.size() >= 8 && data.phone.size() <= 20
         && data.skills is string && data.skills.size() >= 2 && data.skills.size() <= 400
         && data.submittedAt is string && data.submittedAt.size() >= 8 && data.submittedAt.size() <= 30
-        && isValidApprovalStatus(data.status);
+        && isValidApprovalStatus(data.status)
+        && (!('reviewedAt' in data) || data.reviewedAt == '' || isValidTimestampStr(data.reviewedAt))
+        && (!('reviewedByUid' in data) || (data.reviewedByUid is string && data.reviewedByUid.size() <= 128))
+        && (!('reviewNote' in data) || (data.reviewNote is string && data.reviewNote.size() <= 400))
+        && (!('emailNotificationStatus' in data) || data.emailNotificationStatus in ['sent', 'queued', 'failed'])
+        && (!('emailSentAt' in data) || data.emailSentAt == '' || isValidTimestampStr(data.emailSentAt))
+        && (!('emailError' in data) || (data.emailError is string && data.emailError.size() <= 300));
+    }
+
+    function isJoinRequestOwnerEmail(reqEmail) {
+      return signedIn() && (
+        reqEmail.lower() == request.auth.token.email.lower() ||
+        (
+          userDocExists()
+          && ('collegeEmail' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data)
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.collegeEmail is string
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.collegeEmail != ''
+          && reqEmail.lower() == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.collegeEmail.lower()
+        )
+      );
     }
 
     function isValidSiteSettings(data) {
       return data.keys().hasAll(['chapterName', 'collegeName', 'tagline', 'contactEmail', 'campusLocation', 'applicationsOpen', 'publicLeaderboardLimit', 'hackerRankClubUrl'])
-        && data.keys().hasOnly(['chapterName', 'collegeName', 'tagline', 'contactEmail', 'campusLocation', 'applicationsOpen', 'publicLeaderboardLimit', 'hackerRankClubUrl', 'updatedAt'])
+        && data.keys().hasOnly(['chapterName', 'collegeName', 'tagline', 'contactEmail', 'leadName', 'leadPhone', 'campusLocation', 'applicationsOpen', 'publicLeaderboardLimit', 'hackerRankClubUrl', 'updatedAt'])
         && data.chapterName is string && data.chapterName.size() >= 2 && data.chapterName.size() <= 100
         && data.collegeName is string && data.collegeName.size() >= 2 && data.collegeName.size() <= 120
         && data.tagline is string && data.tagline.size() >= 2 && data.tagline.size() <= 120
         && isValidEmail(data.contactEmail)
+        && (!('leadName' in data) || (data.leadName is string && data.leadName.size() <= 100))
+        && (!('leadPhone' in data) || (data.leadPhone is string && data.leadPhone.size() <= 25))
         && data.campusLocation is string && data.campusLocation.size() >= 4 && data.campusLocation.size() <= 200
         && data.applicationsOpen is bool
         && data.publicLeaderboardLimit is number && data.publicLeaderboardLimit >= 3 && data.publicLeaderboardLimit <= 50
@@ -240,13 +325,19 @@ service cloud.firestore {
 
     function isValidPublicProfile(data) {
       return data.keys().hasAll(['uid', 'name', 'department', 'year'])
-        && data.keys().hasOnly(['uid', 'name', 'department', 'year', 'bio', 'photoUrl', 'skills', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'completedDsaCount', 'completedRoadmapCount', 'updatedAt'])
+        && data.keys().hasOnly([
+          'uid', 'name', 'department', 'year', 'bio', 'photoUrl', 'documentUrl',
+          'skills', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl',
+          'completedDsaCount', 'completedRoadmapCount', 'hackerRankSolvedCount',
+          'streak', 'lastPracticeAt', 'recentPractices', 'rank', 'eventsAttended', 'updatedAt'
+        ])
         && isValidId(data.uid)
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 100
         && data.department is string && data.department.size() >= 2 && data.department.size() <= 40
         && data.year is string && data.year.size() >= 2 && data.year.size() <= 20
         && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
         && (!('photoUrl' in data) || isValidOptionalPhotoUrl(data.photoUrl))
+        && (!('documentUrl' in data) || isValidOptionalDocUrl(data.documentUrl))
         && (!('skills' in data) || (data.skills is list && data.skills.size() <= 12 && (data.skills.size() == 0 || data.skills[0] is string)))
         && (!('hackerRankHandle' in data) || (data.hackerRankHandle is string && data.hackerRankHandle.size() <= 60))
         && (!('hackerRankUrl' in data) || (data.hackerRankUrl is string && data.hackerRankUrl.size() <= 300))
@@ -254,6 +345,12 @@ service cloud.firestore {
         && (!('linkedinUrl' in data) || (data.linkedinUrl is string && data.linkedinUrl.size() <= 300))
         && (!('completedDsaCount' in data) || (data.completedDsaCount is number && data.completedDsaCount >= 0 && data.completedDsaCount <= 200))
         && (!('completedRoadmapCount' in data) || (data.completedRoadmapCount is number && data.completedRoadmapCount >= 0 && data.completedRoadmapCount <= 500))
+        && (!('hackerRankSolvedCount' in data) || (data.hackerRankSolvedCount is number && data.hackerRankSolvedCount >= 0 && data.hackerRankSolvedCount <= 50000))
+        && (!('streak' in data) || (data.streak is number && data.streak >= 0 && data.streak <= 5000))
+        && (!('lastPracticeAt' in data) || data.lastPracticeAt == '' || isValidTimestampStr(data.lastPracticeAt))
+        && (!('recentPractices' in data) || (data.recentPractices is list && data.recentPractices.size() <= 10 && (data.recentPractices.size() == 0 || data.recentPractices[0] is map)))
+        && (!('rank' in data) || (data.rank is number && data.rank >= 1 && data.rank <= 50000))
+        && (!('eventsAttended' in data) || (data.eventsAttended is number && data.eventsAttended >= 0 && data.eventsAttended <= 1000))
         && (!('updatedAt' in data) || isValidTimestampStr(data.updatedAt));
     }
 
@@ -271,7 +368,7 @@ service cloud.firestore {
     function isValidEmailSendAttempt(data) {
       return data.keys().hasAll(['type', 'email', 'status', 'attemptedAt'])
         && data.keys().hasOnly(['type', 'email', 'status', 'errorCode', 'errorMessage', 'continueUrl', 'actorUid', 'attemptedAt'])
-        && data.type in ['verification', 'password_reset']
+        && data.type in ['verification', 'password_reset', 'join_request_approved', 'join_request_rejected']
         && isValidEmail(data.email)
         && data.status in ['sent', 'failed']
         && (!('errorCode' in data) || (data.errorCode is string && data.errorCode.size() <= 160))
@@ -283,12 +380,14 @@ service cloud.firestore {
 
     function isValidEventCheckInCode(data) {
       return data.keys().hasAll(['code', 'eventId', 'eventTitle', 'venue', 'isActive', 'createdByUid', 'createdByName', 'createdAt'])
-        && data.keys().hasOnly(['code', 'eventId', 'eventTitle', 'venue', 'isActive', 'createdByUid', 'createdByName', 'createdAt'])
+        && data.keys().hasOnly(['code', 'eventId', 'eventTitle', 'venue', 'isActive', 'opensAt', 'closesAt', 'createdByUid', 'createdByName', 'createdAt'])
         && data.code is string && data.code.size() >= 6 && data.code.size() <= 64 && data.code.matches('^[a-zA-Z0-9_\\-]+$')
         && isValidId(data.eventId)
         && data.eventTitle is string && data.eventTitle.size() >= 2 && data.eventTitle.size() <= 140
         && data.venue is string && data.venue.size() >= 2 && data.venue.size() <= 160
         && data.isActive is bool
+        && (!('opensAt' in data) || data.opensAt is timestamp)
+        && (!('closesAt' in data) || data.closesAt is timestamp)
         && isValidId(data.createdByUid)
         && data.createdByName is string && data.createdByName.size() >= 2 && data.createdByName.size() <= 100
         && isValidTimestampStr(data.createdAt);
@@ -311,15 +410,66 @@ service cloud.firestore {
         && isValidTimestampStr(data.checkedInAt);
     }
 
+    function isCheckInWindowValid(codeData) {
+      return codeData.isActive == true
+        && (!('opensAt' in codeData) || !(codeData.opensAt is timestamp) || request.time >= codeData.opensAt)
+        && (!('closesAt' in codeData) || !(codeData.closesAt is timestamp) || request.time <= codeData.closesAt);
+    }
+
     function isValidCodingActivity(data) {
       return data.keys().hasAll(['userId', 'platform', 'date', 'count', 'title', 'createdAt'])
-        && data.keys().hasOnly(['userId', 'platform', 'date', 'count', 'title', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'platform', 'date', 'count', 'title', 'notesUrl', 'createdAt'])
         && isValidId(data.userId)
         && data.platform in ['HackerRank', 'LeetCode', 'GitHub', 'CodeChef', 'DSA Roadmap', 'Campus Event']
         && data.date is string && data.date.size() == 10 && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
         && data.count is number && data.count >= 1 && data.count <= 500
         && data.title is string && data.title.size() >= 2 && data.title.size() <= 140
+        && (!('notesUrl' in data) || isValidOptionalDocUrl(data.notesUrl))
         && isValidTimestampStr(data.createdAt);
+    }
+
+    function isValidUnstopParticipant(data) {
+      return data.keys().hasAll(['eventId', 'eventTitle', 'name', 'email', 'importedAt', 'importedByUid', 'importedByName'])
+        && data.keys().hasOnly([
+          'eventId', 'eventTitle', 'name', 'email', 'registerNumber',
+          'college', 'teamName', 'status', 'phone', 'matchedUserId',
+          'importedAt', 'importedByUid', 'importedByName'
+        ])
+        && isValidId(data.eventId)
+        && data.eventTitle is string && data.eventTitle.size() >= 2 && data.eventTitle.size() <= 140
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+        && isValidEmail(data.email)
+        && (!('registerNumber' in data) || (data.registerNumber is string && data.registerNumber.size() <= 32))
+        && (!('college' in data) || (data.college is string && data.college.size() <= 160))
+        && (!('teamName' in data) || (data.teamName is string && data.teamName.size() <= 100))
+        && (!('status' in data) || (data.status is string && data.status.size() <= 60))
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 20))
+        && (!('matchedUserId' in data) || (data.matchedUserId is string && data.matchedUserId.size() <= 128))
+        && isValidTimestampStr(data.importedAt)
+        && isValidId(data.importedByUid)
+        && data.importedByName is string && data.importedByName.size() >= 2 && data.importedByName.size() <= 100;
+    }
+
+    function isValidCertificate(data) {
+      return data.keys().hasAll(['certId', 'eventId', 'eventTitle', 'eventDate', 'recipientName', 'awardType', 'issuedAt', 'issuedByUid', 'issuedByName'])
+        && data.keys().hasOnly([
+          'certId', 'eventId', 'eventTitle', 'eventDate', 'recipientUid',
+          'recipientName', 'registerNumber', 'department', 'awardType',
+          'awardTitle', 'issuedAt', 'issuedByUid', 'issuedByName'
+        ])
+        && isValidId(data.certId)
+        && isValidId(data.eventId)
+        && data.eventTitle is string && data.eventTitle.size() >= 2 && data.eventTitle.size() <= 140
+        && data.eventDate is string && data.eventDate.size() >= 4 && data.eventDate.size() <= 40
+        && (!('recipientUid' in data) || (data.recipientUid is string && data.recipientUid.size() <= 128))
+        && data.recipientName is string && data.recipientName.size() >= 2 && data.recipientName.size() <= 100
+        && (!('registerNumber' in data) || (data.registerNumber is string && data.registerNumber.size() <= 32))
+        && (!('department' in data) || (data.department is string && data.department.size() <= 60))
+        && data.awardType in ['Participation', 'Winner', 'Runner-Up', 'Top Performer', 'Crew Recognition']
+        && (!('awardTitle' in data) || (data.awardTitle is string && data.awardTitle.size() <= 140))
+        && isValidTimestampStr(data.issuedAt)
+        && isValidId(data.issuedByUid)
+        && data.issuedByName is string && data.issuedByName.size() >= 2 && data.issuedByName.size() <= 100;
     }
 
     // ------------------------------------------------------------------------
@@ -374,7 +524,7 @@ service cloud.firestore {
           incoming().uid == existing().uid &&
           incoming().email == existing().email &&
           (request.auth.uid != userId || incoming().role == existing().role) &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'name', 'collegeEmail', 'regNo', 'department', 'year', 'phone', 'photoUrl', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'updatedAt'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'name', 'collegeEmail', 'regNo', 'department', 'year', 'phone', 'photoUrl', 'documentUrl', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'updatedAt'])
         ) ||
         (
           isOwner(userId) &&
@@ -382,7 +532,7 @@ service cloud.firestore {
           incoming().email == existing().email &&
           incoming().role == existing().role &&
           (!('emailVerified' in incoming()) || incoming().emailVerified == true) &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'regNo', 'department', 'year', 'phone', 'photoUrl', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'emailVerified', 'updatedAt'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'regNo', 'department', 'year', 'phone', 'photoUrl', 'documentUrl', 'hackerRankHandle', 'hackerRankUrl', 'githubUrl', 'linkedinUrl', 'bio', 'skills', 'emailVerified', 'updatedAt'])
         )
       );
 
@@ -404,7 +554,7 @@ service cloud.firestore {
       allow delete: if isValidId(memberId) && isCampusLead();
     }
 
-    // Non-PII Public Member Portfolios for Community Showcase & Weekly Spotlight
+    // Non-PII Public Member Portfolios for Community Showcase, Team Profile Pages & Weekly Spotlight
     match /public_profiles/{userId} {
       allow get: if isValidId(userId);
       allow list: if true;
@@ -428,8 +578,19 @@ service cloud.firestore {
           (isCrewOrLead() && incoming().status == 'pending')
         );
 
-      allow update: if isValidId(eventId) && isCampusLead() && isValidCampusEvent(incoming())
-        && incoming().createdByUid == existing().createdByUid;
+      allow update: if isValidId(eventId) && isValidCampusEvent(incoming())
+        && incoming().createdByUid == existing().createdByUid
+        && (
+          isCampusLead() ||
+          (
+            isCrewOrLead()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'unstopUrl', 'unstopCompetitionId', 'unstopRegistrationsCount',
+              'unstopViewsCount', 'unstopDeadline', 'unstopOrganiser',
+              'unstopMode', 'unstopPrize', 'unstopSyncedAt', 'updatedAt'
+            ])
+          )
+        );
 
       allow delete: if isValidId(eventId) && isCampusLead();
     }
@@ -452,11 +613,21 @@ service cloud.firestore {
       allow delete: if isValidId(announcementId) && isCampusLead();
     }
 
-    // Leaderboard
+    // Leaderboard (Crew/Lead unrestricted; verified members may self-sync practice/check-in points within strict anti-tamper deltas)
     match /leaderboard/{entryId} {
       allow get: if isValidId(entryId);
       allow list: if true;
-      allow create, update: if isValidId(entryId) && isCrewOrLead() && isValidLeaderboardEntry(incoming());
+
+      allow create: if isValidId(entryId) && (
+        (isCrewOrLead() && isValidLeaderboardEntry(incoming())) ||
+        (isOwner(entryId) && isValidSelfLeaderboardCreate(incoming()))
+      );
+
+      allow update: if isValidId(entryId) && (
+        (isCrewOrLead() && isValidLeaderboardEntry(incoming())) ||
+        (isOwner(entryId) && isValidSelfLeaderboardUpdate(incoming(), existing()))
+      );
+
       allow delete: if isValidId(entryId) && isCrewOrLead();
     }
 
@@ -490,22 +661,51 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/events/$(incoming().eventId))
         && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.status == 'approved';
 
+      allow update: if signedIn() && isValidId(registrationId) && isValidRegistration(incoming())
+        && (isCrewOrLead() || existing().userId == request.auth.uid)
+        && incoming().eventId == existing().eventId
+        && incoming().userId == existing().userId
+        && incoming().userName == existing().userName
+        && incoming().userEmail == existing().userEmail
+        && incoming().registerNumber == existing().registerNumber
+        && incoming().department == existing().department
+        && incoming().year == existing().year
+        && incoming().registeredAt == existing().registeredAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['ticketCode', 'ticketEmailStatus', 'ticketEmailSentAt']);
+
       allow delete: if isValidId(registrationId) && (
         isCampusLead() || (signedIn() && existing().userId == request.auth.uid)
       );
     }
 
-    // Public Join Requests
+    // Public Join Requests (public create; Lead full review/email tracking; verified matching applicant can auto-close own pending request)
     match /join_requests/{requestId} {
-      allow get: if isValidId(requestId) && isCampusLead();
-      allow list: if isCampusLead();
+      allow get: if isValidId(requestId) && (isCampusLead() || isJoinRequestOwnerEmail(existing().email));
+      allow list: if isCampusLead() || (signedIn() && existing().email.lower() == request.auth.token.email.lower());
 
       allow create: if isValidId(requestId) && isValidJoinRequest(incoming())
-        && incoming().status == 'pending';
+        && incoming().status == 'pending'
+        && incoming().keys().hasOnly(['name', 'registerNumber', 'department', 'year', 'email', 'phone', 'skills', 'submittedAt', 'status']);
 
-      allow update: if isValidId(requestId) && isCampusLead() && isValidJoinRequest(incoming())
-        && existing().status == 'pending'
-        && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+      allow update: if isValidId(requestId) && isValidJoinRequest(incoming())
+        && incoming().name == existing().name
+        && incoming().email == existing().email
+        && incoming().registerNumber == existing().registerNumber
+        && incoming().submittedAt == existing().submittedAt
+        && (
+          (
+            isCampusLead()
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'reviewedAt', 'reviewedByUid', 'reviewNote',
+              'emailNotificationStatus', 'emailSentAt', 'emailError'
+            ])
+          ) || (
+            existing().status == 'pending'
+            && incoming().status == 'approved'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+            && isJoinRequestOwnerEmail(existing().email)
+          )
+        );
 
       allow delete: if isValidId(requestId) && isCampusLead();
     }
@@ -538,7 +738,8 @@ service cloud.firestore {
       allow list: if isCampusLead();
       allow create: if isValidId(attemptId) && isValidEmailSendAttempt(incoming()) && (
         incoming().type == 'password_reset' ||
-        hasAuthenticatedSession()
+        (incoming().type == 'verification' && hasAuthenticatedSession()) ||
+        (incoming().type in ['join_request_approved', 'join_request_rejected'] && isCampusLead())
       );
       allow update: if false;
       allow delete: if isValidId(attemptId) && isCampusLead();
@@ -596,7 +797,7 @@ service cloud.firestore {
         && isValidEventCheckInCode(incoming())
         && incoming().code == checkInCode
         && incoming().createdByUid == request.auth.uid
-        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+        && existsAfter(/databases/$(database)/documents/events/$(incoming().eventId));
 
       allow update: if signedIn() && isValidId(checkInCode) && isCrewOrLead()
         && isValidEventCheckInCode(incoming())
@@ -609,7 +810,7 @@ service cloud.firestore {
       allow delete: if isValidId(checkInCode) && isCampusLead();
     }
 
-    // Event Check-Ins (Attendee details stored in Firestore when QR code is scanned)
+    // Event Check-Ins (Deterministic ID ${eventId}_${uid}: supports both Student Self-Check-In via session QR and Crew/Lead Gate Scanner via student Entry Pass QR)
     match /event_checkins/{checkInId} {
       allow get: if isValidId(checkInId) && (
         isCrewOrLead() || (signedIn() && existing().userId == request.auth.uid)
@@ -618,16 +819,31 @@ service cloud.firestore {
 
       allow create: if signedIn() && isValidId(checkInId)
         && isValidEventCheckIn(incoming())
-        && incoming().userId == request.auth.uid
-        && exists(/databases/$(database)/documents/event_checkin_codes/$(incoming().checkInCode))
-        && get(/databases/$(database)/documents/event_checkin_codes/$(incoming().checkInCode)).data.isActive == true
-        && get(/databases/$(database)/documents/event_checkin_codes/$(incoming().checkInCode)).data.eventId == incoming().eventId;
+        && checkInId == incoming().eventId + '_' + incoming().userId
+        && (
+          (
+            incoming().userId == request.auth.uid
+            && exists(/databases/$(database)/documents/event_checkin_codes/$(incoming().checkInCode))
+            && get(/databases/$(database)/documents/event_checkin_codes/$(incoming().checkInCode)).data.eventId == incoming().eventId
+            && isCheckInWindowValid(get(/databases/$(database)/documents/event_checkin_codes/$(incoming().checkInCode)).data)
+          ) || (
+            incoming().userId == request.auth.uid
+            && incoming().checkInCode == 'ONLINE-ATTENDANCE'
+            && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+            && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.status == 'approved'
+            && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.attendanceEnabled == true
+            && exists(/databases/$(database)/documents/registrations/$('reg_' + incoming().eventId + '_' + request.auth.uid))
+          ) || (
+            isCrewOrLead()
+            && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+          )
+        );
 
       allow update: if false;
       allow delete: if isValidId(checkInId) && isCampusLead();
     }
 
-    // Coding Activity Logs for ProfilePage Contribution Heatmap
+    // Coding Activity Logs for ProfilePage Contribution Heatmap & HackerRank Sync
     match /coding_activities/{activityId} {
       allow get: if isValidId(activityId) && (
         isCampusLead() || (signedIn() && existing().userId == request.auth.uid)
@@ -643,6 +859,44 @@ service cloud.firestore {
       allow delete: if isValidId(activityId) && (
         isCampusLead() || (signedIn() && existing().userId == request.auth.uid)
       );
+    }
+
+    // Unstop Imported CSV Participants (PII strictly restricted to Campus Crew & Lead)
+    match /unstop_participants/{participantId} {
+      allow get: if isValidId(participantId) && isCrewOrLead();
+      allow list: if isCrewOrLead();
+
+      allow create, update: if signedIn() && isValidId(participantId)
+        && isCrewOrLead()
+        && isValidUnstopParticipant(incoming())
+        && incoming().importedByUid == request.auth.uid
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+
+      allow delete: if isValidId(participantId) && isCampusLead();
+    }
+
+    // Verifiable E-Certificates (Non-PII public single-doc verification; immutable once issued)
+    match /certificates/{certId} {
+      allow get: if isValidId(certId);
+      allow list: if isCrewOrLead() || (signedIn() && existing().recipientUid == request.auth.uid);
+
+      allow create: if signedIn() && isValidId(certId)
+        && isValidCertificate(incoming())
+        && incoming().certId == certId
+        && incoming().issuedByUid == request.auth.uid
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && (
+          isCrewOrLead() ||
+          (
+            incoming().recipientUid == request.auth.uid
+            && incoming().awardType == 'Participation'
+            && certId == 'CERT-' + incoming().eventId + '-' + request.auth.uid
+            && exists(/databases/$(database)/documents/event_checkins/$(incoming().eventId + '_' + request.auth.uid))
+          )
+        );
+
+      allow update: if false;
+      allow delete: if isValidId(certId) && isCampusLead();
     }
   }
 }

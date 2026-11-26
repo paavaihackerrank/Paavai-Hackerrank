@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Eye, EyeOff, MailCheck } from 'lucide-react';
 import { ACADEMIC_YEARS, DEPARTMENTS, getDashboardPath } from '../config/rbacAndData';
@@ -11,6 +11,8 @@ import {
   isValidPhoneNumber,
   useApp,
 } from '../context/AppContext';
+import { DRIVE_SHARING_HINT, validateDriveOrHttpsUrl } from '../lib/driveUtils';
+import { MemberAvatar } from '../components/MemberAvatar';
 import { NotificationBanner } from '../components/NotificationBanner';
 import { ForgotPassword } from '../components/ForgotPassword';
 import { PageSeo } from '../components/PageSeo';
@@ -248,17 +250,20 @@ export const SignUpPage: React.FC = () => {
   const rawRedirect = searchParams.get('redirect') || '';
   const safeRedirect =
     rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '';
+  const joinReqId = (searchParams.get('joinReqId') || '').trim();
+  const initialDeptParam = (searchParams.get('dept') || '').trim();
+  const initialYearParam = (searchParams.get('year') || '').trim();
 
   const [form, setForm] = useState({
-    name: '',
-    email: '',
-    collegeEmail: '',
+    name: (searchParams.get('name') || '').trim(),
+    email: (searchParams.get('email') || '').trim(),
+    collegeEmail: (searchParams.get('collegeEmail') || '').trim(),
     password: '',
     confirmPassword: '',
-    regNo: '',
-    department: DEPARTMENTS[0],
-    year: ACADEMIC_YEARS[0],
-    phone: '',
+    regNo: (searchParams.get('regNo') || '').trim(),
+    department: DEPARTMENTS.includes(initialDeptParam) ? initialDeptParam : DEPARTMENTS[0],
+    year: ACADEMIC_YEARS.includes(initialYearParam) ? initialYearParam : ACADEMIC_YEARS[0],
+    phone: (searchParams.get('phone') || '').trim(),
     hackerRankHandle: '',
     photoUrl: '',
   });
@@ -266,6 +271,11 @@ export const SignUpPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const photoValidation = useMemo(
+    () => validateDriveOrHttpsUrl(form.photoUrl, { allowEmpty: true }),
+    [form.photoUrl]
+  );
 
   useEffect(() => {
     if (currentUser && currentRole !== 'outsider') {
@@ -312,8 +322,11 @@ export const SignUpPage: React.FC = () => {
       setError('Enter a valid 10-digit unique phone number.');
       return;
     }
-    if (!isValidOptionalImageUrl(form.photoUrl)) {
-      setError('Profile image URL must start with https:// or http:// (max 500 characters).');
+    if (!isValidOptionalImageUrl(form.photoUrl) || !photoValidation.valid) {
+      setError(
+        photoValidation.error ||
+          'Profile image link must be a valid Google Drive share link or https:// URL (max 500 characters).'
+      );
       return;
     }
     if (form.password.length < 6) {
@@ -338,6 +351,7 @@ export const SignUpPage: React.FC = () => {
       phone: form.phone,
       hackerRankHandle: form.hackerRankHandle,
       photoUrl: form.photoUrl,
+      joinReqId: joinReqId || undefined,
     });
     setSubmitting(false);
 
@@ -372,6 +386,16 @@ export const SignUpPage: React.FC = () => {
             <strong>Student Community Member</strong> access.
           </p>
         </div>
+
+        {joinReqId && (
+          <div className="p-3 rounded-lg text-xs font-mono bg-[#00EA64]/10 border border-[#00EA64]/35 text-[#009942] dark:text-[#00EA64] flex items-start gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+            <span>
+              Pre-filled from your Join Request. Once you verify your personal email, your inquiry
+              will automatically be marked approved.
+            </span>
+          </div>
+        )}
 
         {error && (
           <div
@@ -517,19 +541,41 @@ export const SignUpPage: React.FC = () => {
           </div>
 
           <div>
-            <label htmlFor="su-photo" className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1">
-              Profile Image URL (optional)
-            </label>
-            <input
-              id="su-photo"
-              type="url"
-              value={form.photoUrl}
-              onChange={(e) => setForm({ ...form, photoUrl: e.target.value })}
-              placeholder="https://example.com/your-photo.jpg"
-              className="w-full h-10 px-3 rounded-lg text-sm font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
-            />
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+              <label htmlFor="su-photo" className="block text-xs font-mono text-slate-600 dark:text-slate-300">
+                Profile Image Link — Google Drive or Direct URL (optional)
+              </label>
+              {form.photoUrl.trim() && photoValidation.valid && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-[#00EA64]/15 text-[#009942] dark:text-[#00EA64]">
+                  <CheckCircle2 className="w-3 h-3" aria-hidden="true" />
+                  <span>{photoValidation.isDrive ? 'Drive Link Ready' : 'Image URL Ready'}</span>
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <MemberAvatar
+                name={form.name || 'Member'}
+                photoUrl={form.photoUrl}
+                variant="member"
+                sizeClass="w-10 h-10"
+                roundedClass="rounded-lg"
+                textClass="text-xs"
+              />
+              <input
+                id="su-photo"
+                type="url"
+                value={form.photoUrl}
+                onChange={(e) => setForm({ ...form, photoUrl: e.target.value })}
+                placeholder="https://drive.google.com/file/d/.../view"
+                className="flex-1 h-10 px-3 rounded-lg text-sm font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+              />
+            </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-              Direct <span className="font-mono">https://</span> image link shown on your profile &amp; Team page
+              {form.photoUrl.trim()
+                ? photoValidation.valid
+                  ? photoValidation.hint
+                  : photoValidation.error
+                : `Paste a Google Drive share link or https:// URL. ${DRIVE_SHARING_HINT}.`}
             </p>
           </div>
 

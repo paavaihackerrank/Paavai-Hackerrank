@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle2 } from 'lucide-react';
+import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import { ACADEMIC_YEARS, CHAPTER_IMAGES, DEPARTMENTS } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 import { PageSeo } from '../components/PageSeo';
@@ -18,7 +18,10 @@ export const JoinUsPage: React.FC = () => {
     skills: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [submittedSignupUrl, setSubmittedSignupUrl] = useState('/signup');
+  const [submittedIsPaavaiEmail, setSubmittedIsPaavaiEmail] = useState(false);
 
   const validate = () => {
     const next: Record<string, string> = {};
@@ -39,18 +42,38 @@ export const JoinUsPage: React.FC = () => {
     return Object.keys(next).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
-    submitJoinRequest({
+    if (!validate() || submitting) return;
+    setSubmitting(true);
+    const cleanEmail = form.email.trim().toLowerCase();
+    const cleanReg = form.registerNumber.trim().toUpperCase();
+    const res = await submitJoinRequest({
       name: form.name.trim(),
-      registerNumber: form.registerNumber.trim().toUpperCase(),
+      registerNumber: cleanReg,
       department: form.department,
       year: form.year,
-      email: form.email.trim().toLowerCase(),
+      email: cleanEmail,
       phone: form.phone.trim(),
       skills: form.skills.trim(),
     });
+    setSubmitting(false);
+
+    const isPaavai = cleanEmail.endsWith('@paavai.edu.in');
+    const params = new URLSearchParams();
+    if (res.id) params.set('joinReqId', res.id);
+    params.set('name', form.name.trim());
+    params.set('regNo', cleanReg);
+    params.set('dept', form.department);
+    params.set('year', form.year);
+    params.set('phone', form.phone.trim());
+    if (isPaavai) {
+      params.set('collegeEmail', cleanEmail);
+    } else {
+      params.set('email', cleanEmail);
+    }
+    setSubmittedIsPaavaiEmail(isPaavai);
+    setSubmittedSignupUrl(`/signup?${params.toString()}`);
     setSubmitted(true);
   };
 
@@ -58,23 +81,30 @@ export const JoinUsPage: React.FC = () => {
     return (
       <div className="max-w-2xl mx-auto px-4 sm:px-6 py-20 text-center space-y-4">
         <PageSeo
-          title="Applications Paused – Join HackerRank Campus Crew"
-          description={`Membership intake for HackerRank Campus Crew at ${siteSettings.collegeName} is currently paused.`}
-          canonicalPath="/join"
+          title="Page Currently Unavailable"
+          description={`Explore upcoming coding events and learning tracks at ${siteSettings.collegeName}.`}
+          noIndex
         />
-        <h1 className="font-mono text-3xl font-bold text-slate-900 dark:text-white">
-          Membership Applications Paused
+        <h1 className="font-mono text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
+          This Page Is Currently Unavailable
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-400">
-          The Campus Lead has temporarily closed new intake requests. Check back during the next
-          semester drive or contact {siteSettings.contactEmail}.
+          Explore upcoming coding contests, technical workshops, and learning roadmaps on the portal.
         </p>
-        <Link
-          to="/"
-          className="inline-block px-5 py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14]"
-        >
-          Back to Home
-        </Link>
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+          <Link
+            to="/"
+            className="inline-block px-5 py-2.5 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors"
+          >
+            Back to Home
+          </Link>
+          <Link
+            to="/events"
+            className="inline-block px-5 py-2.5 rounded-lg text-sm font-medium border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#00EA64] transition-colors"
+          >
+            Explore Events
+          </Link>
+        </div>
       </div>
     );
   }
@@ -133,11 +163,21 @@ export const JoinUsPage: React.FC = () => {
               </h2>
               <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
                 Thank you, <strong>{form.name}</strong> ({form.registerNumber}). Your Crew inquiry
-                has been recorded in the Lead Dashboard. You can also create a student account right
-                now using your personal email and unique{' '}
-                <strong>@paavai.edu.in</strong> college ID for instant member access.
+                has been recorded in the Lead Dashboard.
+                {submittedIsPaavaiEmail
+                  ? ' Because you applied with your @paavai.edu.in college email, continue directly to pre-filled student signup — once you verify your personal email, your Join Request will automatically approve and close!'
+                  : ' Continue to pre-filled student signup with your personal email and @paavai.edu.in college ID to activate instant Student Community Member access.'}
               </p>
               <div className="flex flex-wrap gap-3 pt-2">
+                {!currentUser && (
+                  <Link
+                    to={submittedSignupUrl}
+                    className="px-4 py-2.5 rounded-lg text-xs font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors inline-flex items-center gap-1.5"
+                  >
+                    <span>Continue to Pre-Filled Signup</span>
+                    <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+                  </Link>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -152,13 +192,13 @@ export const JoinUsPage: React.FC = () => {
                       skills: '',
                     });
                   }}
-                  className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#00EA64] text-[#0B0F14]"
+                  className="px-4 py-2.5 rounded-lg text-xs font-medium border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#00EA64]"
                 >
                   Submit Another Request
                 </button>
                 <Link
                   to="/events"
-                  className="px-4 py-2 rounded-lg text-xs font-medium border border-slate-300 dark:border-slate-700"
+                  className="px-4 py-2.5 rounded-lg text-xs font-medium border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#00EA64]"
                 >
                   Browse Public Events
                 </Link>
@@ -291,9 +331,10 @@ export const JoinUsPage: React.FC = () => {
 
               <button
                 type="submit"
-                className="w-full py-3 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors"
+                disabled={submitting}
+                className="w-full py-3 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] disabled:opacity-60 transition-colors"
               >
-                Submit Membership Request
+                {submitting ? 'Submitting Request...' : 'Submit Membership Request'}
               </button>
             </form>
           )}

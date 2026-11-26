@@ -1,10 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Calendar, CheckCircle2, Clock, Lock, MapPin, QrCode, Users, X } from 'lucide-react';
+import {
+  Calendar,
+  CheckCircle2,
+  Clock,
+  ExternalLink,
+  FileText,
+  Lock,
+  MapPin,
+  QrCode,
+  Users,
+  X,
+} from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { SafeImage } from '../components/SafeImage';
+import { DriveDocumentViewer } from '../components/DriveDocumentViewer';
 import { PageSeo, toAbsoluteUrl } from '../components/PageSeo';
-import { CHAPTER_IMAGES } from '../config/rbacAndData';
+import { CHAPTER_IMAGES, getEffectiveEventMode } from '../config/rbacAndData';
 
 function formatCountdown(targetISO: string, nowMs: number) {
   const diff = new Date(targetISO).getTime() - nowMs;
@@ -30,6 +42,7 @@ export const EventsPage: React.FC = () => {
   const queryFilter = (searchParams.get('q') || '').trim();
   const [filter, setFilter] = useState<'all' | 'upcoming' | 'members' | 'past'>('all');
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [viewerDoc, setViewerDoc] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -189,7 +202,13 @@ export const EventsPage: React.FC = () => {
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0B0F14]/85 via-[#0B0F14]/20 to-transparent" />
                   <div className="absolute bottom-3 left-4 right-4 flex items-center justify-between text-xs font-mono text-slate-200">
                     <span>
-                      {ev.category} · {ev.membersOnly ? 'Members Only' : 'Open Event'}
+                      {ev.category}
+                      {getEffectiveEventMode(ev) === 'online'
+                        ? ' · Online'
+                        : getEffectiveEventMode(ev) === 'hybrid'
+                        ? ' · Hybrid'
+                        : ''}{' '}
+                      · {ev.membersOnly ? 'Members Only' : 'Open Event'}
                     </span>
                     <span className="tabular-nums">
                       {regCount} / {ev.capacity} seats
@@ -228,6 +247,30 @@ export const EventsPage: React.FC = () => {
                     <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
                       {ev.description}
                     </p>
+
+                    {ev.unstopUrl && (
+                      <div className="p-3 rounded-lg border border-sky-500/30 bg-sky-500/5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-sky-800 dark:text-sky-300">
+                          <span className="font-semibold">Unstop Synced</span>
+                          {ev.unstopRegistrationsCount !== undefined && (
+                            <span className="tabular-nums">
+                              {ev.unstopRegistrationsCount.toLocaleString('en-IN')} registered
+                            </span>
+                          )}
+                          {ev.unstopMode && <span>· {ev.unstopMode}</span>}
+                          {ev.unstopPrize && <span>· Prize: {ev.unstopPrize}</span>}
+                        </div>
+                        <a
+                          href={ev.unstopUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 font-mono font-semibold text-sky-700 dark:text-sky-300 hover:underline whitespace-nowrap shrink-0"
+                        >
+                          <span>Unstop</span>
+                          <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                        </a>
+                      </div>
+                    )}
                   </div>
 
                   {/* Live Countdown Timer */}
@@ -258,11 +301,27 @@ export const EventsPage: React.FC = () => {
 
                     {/* Action Row */}
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
                         <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                           <Users className="w-3.5 h-3.5" aria-hidden="true" />
                           Host: {ev.createdByName}
                         </span>
+                        {ev.documentUrl && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setViewerDoc({
+                                url: ev.documentUrl!,
+                                title: `${ev.title} — Event Document`,
+                                subtitle: `${ev.category} · ${ev.venue}`,
+                              })
+                            }
+                            className="inline-flex items-center gap-1 text-xs font-mono text-[#009942] dark:text-[#00EA64] hover:underline whitespace-nowrap"
+                          >
+                            <FileText className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Event Doc</span>
+                          </button>
+                        )}
                         <Link
                           to={`/events/${encodeURIComponent(ev.id)}`}
                           className="text-xs font-mono text-[#009942] dark:text-[#00EA64] hover:underline whitespace-nowrap"
@@ -312,6 +371,13 @@ export const EventsPage: React.FC = () => {
           })}
         </div>
       )}
+
+      <DriveDocumentViewer
+        url={viewerDoc?.url ?? null}
+        title={viewerDoc?.title}
+        subtitle={viewerDoc?.subtitle}
+        onClose={() => setViewerDoc(null)}
+      />
     </div>
   );
 };

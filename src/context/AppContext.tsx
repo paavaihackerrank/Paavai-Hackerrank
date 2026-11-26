@@ -23,6 +23,7 @@ import {
   verifyPasswordResetCode,
 } from 'firebase/auth';
 import {
+  Timestamp,
   collection,
   deleteDoc,
   doc,
@@ -39,11 +40,14 @@ import {
   Announcement,
   CODING_PLATFORMS,
   CampusEvent,
+  CertificateAwardType,
   CodingActivity,
   CodingPlatform,
   EmailSendAttempt,
+  EventCertificate,
   EventCheckIn,
   EventCheckInCode,
+  EventMode,
   EventRegistration,
   GalleryPhoto,
   INITIAL_SITE_SETTINGS,
@@ -51,22 +55,33 @@ import {
   LeaderboardEntry,
   LearningResource,
   PermissionKey,
+  PracticeSummary,
   PublicProfile,
   ROLE_META,
   SiteSettings,
   TeamMember,
+  UnstopParticipant,
+  UnstopSyncedEventDetails,
   UserAccount,
   UserRole,
+  buildAttendeeTicketCode,
   getDashboardPath,
+  getEffectiveEventMode,
   hasPermission,
+  isOnlineAttendanceEnabled,
+  isOnlineEvent,
 } from '../config/rbacAndData';
 import {
+  CAMPUS_LEAD_EMAIL,
   OperationType,
   auth,
   db,
   handleFirestoreError,
   isBootstrappedAdminEmail,
 } from '../lib/firebase';
+import { isValidDriveOrHttpsUrl } from '../lib/driveUtils';
+import { ParsedUnstopRow, buildUnstopParticipantDocId } from '../lib/unstopCsv';
+import { buildAttendanceCsvContent, downloadCsvFile } from '../lib/attendanceCsvExport';
 
 export type ToastVariant = 'success' | 'error' | 'info';
 
@@ -88,6 +103,7 @@ interface SignupPayload {
   phone: string;
   hackerRankHandle: string;
   photoUrl?: string;
+  joinReqId?: string;
 }
 
 interface PendingSignupMeta {
@@ -99,6 +115,7 @@ interface PendingSignupMeta {
   phone: string;
   hackerRankHandle: string;
   photoUrl?: string;
+  joinReqId?: string;
 }
 
 export interface AuthActionResult {
@@ -169,8 +186,10 @@ interface AppContextValue {
   resources: LearningResource[];
   gallery: GalleryPhoto[];
   registrations: EventRegistration[];
+  unstopParticipants: UnstopParticipant[];
   checkInCodes: EventCheckInCode[];
   eventCheckIns: EventCheckIn[];
+  certificates: EventCertificate[];
   joinRequests: JoinRequest[];
   completedResourceIds: string[];
   codingActivities: CodingActivity[];
@@ -186,6 +205,14 @@ interface AppContextValue {
   deleteEvent: (id: string) => Promise<void>;
   approveEvent: (id: string) => Promise<void>;
   rejectEvent: (id: string) => Promise<void>;
+  toggleOnlineEventAttendance: (eventId: string, enabled: boolean) => Promise<void>;
+  fetchUnstopEventDetails: (
+    unstopUrl: string
+  ) => Promise<{ ok: boolean; data?: UnstopSyncedEventDetails; error?: string }>;
+  syncEventFromUnstop: (
+    eventId: string,
+    unstopUrlOverride?: string
+  ) => Promise<{ ok: boolean; data?: UnstopSyncedEventDetails; error?: string }>;
 
   // Actions — Announcements
   createAnnouncement: (payload: {
@@ -197,10 +224,21 @@ interface AppContextValue {
   approveAnnouncement: (id: string) => Promise<void>;
   rejectAnnouncement: (id: string) => Promise<void>;
 
-  // Actions — Registrations & QR Check-Ins
+  // Actions — Registrations, Unstop CSV & QR Check-Ins
   registerForEvent: (eventId: string) => Promise<void>;
   cancelRegistration: (eventId: string) => Promise<void>;
+  resendEventTicketEmail: (registrationId: string) => Promise<{
+    ok: boolean;
+    delivered?: boolean;
+    message?: string;
+  }>;
   exportRegistrationsCSV: () => void;
+  importUnstopParticipants: (
+    eventId: string,
+    rows: ParsedUnstopRow[]
+  ) => Promise<{ ok: boolean; importedCount?: number; error?: string }>;
+  deleteUnstopParticipant: (id: string) => Promise<void>;
+  clearEventUnstopParticipants: (eventId: string) => Promise<void>;
   generateEventCheckInCode: (
     eventId: string
   ) => Promise<{ ok: boolean; codeDoc?: EventCheckInCode; error?: string }>;
@@ -215,7 +253,51 @@ interface AppContextValue {
     alreadyCheckedIn?: boolean;
     error?: string;
   }>;
+  markOnlineEventAttendance: (eventId: string) => Promise<{
+    ok: boolean;
+    checkIn?: EventCheckIn;
+    alreadyMarked?: boolean;
+    error?: string;
+  }>;
+  crewCheckInAttendeeByTicket: (
+    rawInput: string,
+    expectedEventId?: string
+  ) => Promise<{
+    ok: boolean;
+    checkIn?: EventCheckIn;
+    alreadyCheckedIn?: boolean;
+    error?: string;
+  }>;
   exportEventCheckInsCSV: (filterEventId?: string) => void;
+
+  // Actions — Verifiable E-Certificates
+  claimParticipationCertificate: (eventId: string) => Promise<{
+    ok: boolean;
+    certificate?: EventCertificate;
+    alreadyIssued?: boolean;
+    error?: string;
+  }>;
+  issueEventCertificate: (payload: {
+    eventId: string;
+    recipientUid?: string;
+    recipientName: string;
+    registerNumber?: string;
+    department?: string;
+    awardType: CertificateAwardType;
+    awardTitle?: string;
+  }) => Promise<{ ok: boolean; certificate?: EventCertificate; error?: string }>;
+  issueCertificatesForEventCheckIns: (eventId: string) => Promise<{
+    ok: boolean;
+    issuedCount?: number;
+    skippedCount?: number;
+    error?: string;
+  }>;
+  deleteCertificate: (certId: string) => Promise<void>;
+  getCertificateById: (certId: string) => Promise<{
+    ok: boolean;
+    certificate?: EventCertificate;
+    error?: string;
+  }>;
 
   // Actions — Leaderboard
   upsertLeaderboardEntry: (entry: Omit<LeaderboardEntry, 'id'> & { id?: string }) => Promise<void>;
@@ -232,7 +314,16 @@ interface AppContextValue {
     date: string;
     count: number;
     title: string;
+    notesUrl?: string;
   }) => Promise<{ ok: boolean; error?: string }>;
+  syncHackerRankPractice: (manualSolvedTotal?: number) => Promise<{
+    ok: boolean;
+    delta?: number;
+    totalSolved?: number;
+    source?: 'hackerrank_api' | 'manual_sync';
+    corsBlocked?: boolean;
+    error?: string;
+  }>;
   deleteCodingActivity: (activityId: string) => Promise<void>;
 
   // Actions — Users, Join Requests & Settings
@@ -244,8 +335,25 @@ interface AppContextValue {
   deleteUser: (userId: string) => Promise<void>;
   submitJoinRequest: (
     req: Omit<JoinRequest, 'id' | 'submittedAt' | 'status'>
-  ) => Promise<void>;
-  reviewJoinRequest: (requestId: string, decision: 'approved' | 'rejected') => Promise<void>;
+  ) => Promise<{ ok: boolean; id?: string }>;
+  reviewJoinRequest: (
+    requestId: string,
+    decision: 'approved' | 'rejected',
+    options?: { reviewNote?: string; leadPhoneOverride?: string }
+  ) => Promise<{
+    ok: boolean;
+    emailStatus: 'sent' | 'queued' | 'failed';
+    emailMessage?: string;
+  }>;
+  resendJoinRequestEmail: (
+    requestId: string,
+    options?: { reviewNote?: string; leadPhoneOverride?: string }
+  ) => Promise<{
+    ok: boolean;
+    emailStatus: 'sent' | 'queued' | 'failed';
+    emailMessage?: string;
+  }>;
+  deleteJoinRequest: (requestId: string) => Promise<void>;
   updateSiteSettings: (updates: Partial<SiteSettings>) => Promise<void>;
   updateOwnProfile: (
     updates: Partial<
@@ -257,6 +365,7 @@ interface AppContextValue {
         | 'year'
         | 'phone'
         | 'photoUrl'
+        | 'documentUrl'
         | 'hackerRankHandle'
         | 'hackerRankUrl'
         | 'githubUrl'
@@ -290,18 +399,20 @@ export function isValidOptionalImageUrl(raw?: string | null): boolean {
   if (!trimmed) return true;
   if (trimmed.length > 500) return false;
   if (trimmed.startsWith('/src/')) return true;
-  try {
-    const parsed = new URL(trimmed);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
-  } catch {
-    return false;
-  }
+  return isValidDriveOrHttpsUrl(trimmed);
 }
 
 export function sanitizeImageUrl(raw?: string | null): string {
   const trimmed = (raw || '').trim();
   if (!trimmed || trimmed.length > 500) return '';
   if (trimmed.startsWith('/src/')) return trimmed;
+  if (isValidDriveOrHttpsUrl(trimmed)) return trimmed;
+  return '';
+}
+
+function sanitizeOptionalDocUrl(raw?: string | null): string {
+  const trimmed = (raw || '').trim();
+  if (!trimmed || trimmed.length > 500) return '';
   try {
     const parsed = new URL(trimmed);
     if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
@@ -311,6 +422,57 @@ export function sanitizeImageUrl(raw?: string | null): string {
     return '';
   }
   return '';
+}
+
+const PENDING_JOIN_REQ_KEY = 'hrcc_pending_join_req_id';
+
+function computeEventCheckInWindow(dateISO: string): {
+  opensAt: Timestamp;
+  closesAt: Timestamp;
+} {
+  const normalized =
+    /^\d{4}-\d{2}-\d{2}$/.test(dateISO.trim())
+      ? `${dateISO.trim()}T09:00:00`
+      : dateISO.trim();
+  const parsedMs = Date.parse(normalized);
+  const startMs = Number.isFinite(parsedMs) ? parsedMs : Date.now();
+  const opensAt = Timestamp.fromDate(new Date(startMs - 30 * 60_000));
+  const closesAt = Timestamp.fromDate(new Date(startMs + 4 * 60 * 60_000));
+  return { opensAt, closesAt };
+}
+
+function computeCodingStreak(activities: CodingActivity[], extraDate?: string): number {
+  const dates = new Set<string>(activities.map((a) => a.date).filter(Boolean));
+  if (extraDate) dates.add(extraDate);
+  if (dates.size === 0) return 0;
+
+  const now = new Date();
+  const toKey = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const cursor = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (!dates.has(toKey(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  let streak = 0;
+  while (dates.has(toKey(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return Math.max(streak, dates.size > 0 ? 1 : 0);
+}
+
+function toTimestampMs(val: unknown): number | null {
+  if (!val) return null;
+  if (val instanceof Timestamp) return val.toMillis();
+  if (typeof (val as { toMillis?: () => number }).toMillis === 'function') {
+    return (val as { toMillis: () => number }).toMillis();
+  }
+  if (typeof val === 'string' || typeof val === 'number') {
+    const ms = new Date(val).getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  return null;
 }
 
 const RESEND_COOLDOWN_MS = 60_000;
@@ -381,8 +543,19 @@ async function sendVerificationWithRedirect(user: FirebaseUser): Promise<EmailDi
   };
 }
 
+function normalizeEmailAttemptType(raw: unknown): EmailSendAttempt['type'] {
+  if (
+    raw === 'password_reset' ||
+    raw === 'join_request_approved' ||
+    raw === 'join_request_rejected'
+  ) {
+    return raw;
+  }
+  return 'verification';
+}
+
 async function logEmailSendAttempt(entry: {
-  type: 'verification' | 'password_reset';
+  type: EmailSendAttempt['type'];
   email: string;
   status: 'sent' | 'failed';
   errorCode?: string;
@@ -601,8 +774,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [resources, setResources] = useState<LearningResource[]>([]);
   const [gallery, setGallery] = useState<GalleryPhoto[]>([]);
   const [registrations, setRegistrations] = useState<EventRegistration[]>([]);
+  const [unstopParticipants, setUnstopParticipants] = useState<UnstopParticipant[]>([]);
   const [checkInCodes, setCheckInCodes] = useState<EventCheckInCode[]>([]);
   const [eventCheckIns, setEventCheckIns] = useState<EventCheckIn[]>([]);
+  const [certificates, setCertificates] = useState<EventCertificate[]>([]);
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [completedResourceIds, setCompletedResourceIds] = useState<string[]>([]);
   const [codingActivities, setCodingActivities] = useState<CodingActivity[]>([]);
@@ -722,6 +897,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
           }
 
+          const joinReqIdToClose =
+            (() => {
+              try {
+                return localStorage.getItem(PENDING_JOIN_REQ_KEY) || '';
+              } catch {
+                return '';
+              }
+            })();
+
+          const tryAutoCloseJoinRequest = async () => {
+            if (!fbUser.emailVerified) return;
+            try {
+              if (joinReqIdToClose) {
+                const reqRef = doc(db, 'join_requests', sanitizeId(joinReqIdToClose));
+                const reqSnap = await getDoc(reqRef).catch(() => null);
+                if (reqSnap?.exists() && reqSnap.data()?.status === 'pending') {
+                  await updateDoc(reqRef, { status: 'approved' }).catch(() => {});
+                }
+                try {
+                  localStorage.removeItem(PENDING_JOIN_REQ_KEY);
+                } catch {
+                  // Ignore storage errors
+                }
+              }
+              if (isValidAccountEmail(rawEmailLower)) {
+                const matchingSnap = await getDocs(
+                  query(collection(db, 'join_requests'), where('email', '==', rawEmailLower))
+                ).catch(() => null);
+                if (matchingSnap && !matchingSnap.empty) {
+                  for (const d of matchingSnap.docs) {
+                    if (d.data()?.status === 'pending') {
+                      await updateDoc(d.ref, { status: 'approved' }).catch(() => {});
+                    }
+                  }
+                }
+              }
+            } catch {
+              // Non-blocking cleanup
+            }
+          };
+
+          void tryAutoCloseJoinRequest();
+
           return resolvedRole;
         }
 
@@ -781,6 +999,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             })
           );
         }
+
+        if (fbUser.emailVerified) {
+          const reqIdFromPending = pending?.joinReqId || (() => {
+            try {
+              return localStorage.getItem(PENDING_JOIN_REQ_KEY) || '';
+            } catch {
+              return '';
+            }
+          })();
+          if (reqIdFromPending) {
+            const reqRef = doc(db, 'join_requests', sanitizeId(reqIdFromPending));
+            const reqSnap = await getDoc(reqRef).catch(() => null);
+            if (reqSnap?.exists() && reqSnap.data()?.status === 'pending') {
+              await updateDoc(reqRef, { status: 'approved' }).catch(() => {});
+            }
+            try {
+              localStorage.removeItem(PENDING_JOIN_REQ_KEY);
+            } catch {
+              // Ignore storage errors
+            }
+          }
+        }
+
         clearPendingMeta(fbUser.uid);
         return assignedRole;
       } catch (err) {
@@ -850,6 +1091,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             year: String(data.year || '1st Year'),
             phone: String(data.phone || ''),
             photoUrl: sanitizeImageUrl(String(data.photoUrl || '')),
+            documentUrl: sanitizeOptionalDocUrl(String(data.documentUrl || '')),
             hackerRankHandle: String(data.hackerRankHandle || '@paavai_coder'),
             hackerRankUrl: data.hackerRankUrl ? String(data.hackerRankUrl) : '',
             githubUrl: data.githubUrl ? String(data.githubUrl) : '',
@@ -909,6 +1151,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               date: String(x.date || ''),
               count: Number(x.count || 1),
               title: String(x.title || ''),
+              notesUrl: x.notesUrl ? sanitizeOptionalDocUrl(String(x.notesUrl)) : '',
               createdAt: String(x.createdAt || ''),
             };
           })
@@ -952,6 +1195,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             collegeName: String(d.collegeName || INITIAL_SITE_SETTINGS.collegeName),
             tagline: String(d.tagline || INITIAL_SITE_SETTINGS.tagline),
             contactEmail: String(d.contactEmail || INITIAL_SITE_SETTINGS.contactEmail),
+            leadName: String(d.leadName || INITIAL_SITE_SETTINGS.leadName || ''),
+            leadPhone: String(d.leadPhone || INITIAL_SITE_SETTINGS.leadPhone || ''),
             campusLocation: String(d.campusLocation || INITIAL_SITE_SETTINGS.campusLocation),
             applicationsOpen: Boolean(d.applicationsOpen ?? true),
             publicLeaderboardLimit: Number(d.publicLeaderboardLimit || 10),
@@ -1013,6 +1258,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               createdByName: String(x.createdByName || 'Crew'),
               createdByRole: (x.createdByRole as UserRole) || 'crew',
               bannerImage: String(x.bannerImage || ''),
+              documentUrl: x.documentUrl ? sanitizeOptionalDocUrl(String(x.documentUrl)) : '',
+              unstopUrl: typeof x.unstopUrl === 'string' ? x.unstopUrl : '',
+              unstopCompetitionId:
+                typeof x.unstopCompetitionId === 'string' ? x.unstopCompetitionId : '',
+              unstopRegistrationsCount:
+                typeof x.unstopRegistrationsCount === 'number'
+                  ? x.unstopRegistrationsCount
+                  : undefined,
+              unstopViewsCount:
+                typeof x.unstopViewsCount === 'number' ? x.unstopViewsCount : undefined,
+              unstopDeadline: typeof x.unstopDeadline === 'string' ? x.unstopDeadline : '',
+              unstopOrganiser: typeof x.unstopOrganiser === 'string' ? x.unstopOrganiser : '',
+              unstopMode: typeof x.unstopMode === 'string' ? x.unstopMode : '',
+              unstopPrize: typeof x.unstopPrize === 'string' ? x.unstopPrize : '',
+              unstopSyncedAt: typeof x.unstopSyncedAt === 'string' ? x.unstopSyncedAt : '',
+              eventMode:
+                x.eventMode === 'online' || x.eventMode === 'hybrid' || x.eventMode === 'offline'
+                  ? (x.eventMode as EventMode)
+                  : undefined,
+              attendanceEnabled:
+                typeof x.attendanceEnabled === 'boolean' ? x.attendanceEnabled : undefined,
+              meetingUrl: typeof x.meetingUrl === 'string' ? x.meetingUrl : '',
             };
           })
         );
@@ -1045,24 +1312,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (error) => handleFirestoreError(error, OperationType.LIST, 'announcements')
     );
 
-    // 5. Leaderboard
+    // 5. Leaderboard (Dynamically auto-aligned descending by score -> problemsSolved -> eventsAttended)
     const unsubLeaderboard = onSnapshot(
       collection(db, 'leaderboard'),
       (snap) => {
+        const mapped: LeaderboardEntry[] = snap.docs.map((d) => {
+          const x = d.data();
+          const solved = Number(x.solvedCount ?? x.problemsSolved ?? 0);
+          return {
+            id: d.id,
+            uid: x.uid ? String(x.uid) : undefined,
+            name: String(x.name || ''),
+            registerNumber: String(x.registerNumber || ''),
+            department: String(x.department || ''),
+            year: String(x.year || ''),
+            score: Number(x.score || 0),
+            problemsSolved: solved,
+            solvedCount: solved,
+            eventsAttended: Number(x.eventsAttended || 0),
+            rank: typeof x.rank === 'number' ? x.rank : undefined,
+            hackerRankHandle: String(x.hackerRankHandle || '@coder'),
+          };
+        });
+        mapped.sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          if (b.problemsSolved !== a.problemsSolved) return b.problemsSolved - a.problemsSolved;
+          const evDiff = (b.eventsAttended || 0) - (a.eventsAttended || 0);
+          if (evDiff !== 0) return evDiff;
+          return a.name.localeCompare(b.name);
+        });
         setLeaderboard(
-          snap.docs.map((d) => {
-            const x = d.data();
-            return {
-              id: d.id,
-              name: String(x.name || ''),
-              registerNumber: String(x.registerNumber || ''),
-              department: String(x.department || ''),
-              year: String(x.year || ''),
-              score: Number(x.score || 0),
-              problemsSolved: Number(x.problemsSolved || 0),
-              hackerRankHandle: String(x.hackerRankHandle || '@coder'),
-            };
-          })
+          mapped.map((entry, idx) => ({
+            ...entry,
+            rank: idx + 1,
+          }))
         );
       },
       (error) => handleFirestoreError(error, OperationType.LIST, 'leaderboard')
@@ -1088,6 +1371,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               problemCount: Number(x.problemCount || 15),
               summary: String(x.summary || ''),
               url: String(x.url || 'https://www.hackerrank.com'),
+              documentUrl: x.documentUrl ? sanitizeOptionalDocUrl(String(x.documentUrl)) : '',
               topics: Array.isArray(x.topics) ? x.topics.map(String) : [],
             };
           })
@@ -1118,13 +1402,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (error) => handleFirestoreError(error, OperationType.LIST, 'gallery')
     );
 
-    // 8. Public Non-PII Member Portfolios (for Member Spotlight)
+    // 8. Public Non-PII Member Portfolios (for Member Spotlight & Team Member Profiles)
     const unsubPublicProfiles = onSnapshot(
       collection(db, 'public_profiles'),
       (snap) => {
         setPublicProfiles(
           snap.docs.map((d) => {
             const x = d.data();
+            const recentRaw = Array.isArray(x.recentPractices) ? x.recentPractices : [];
+            const recentPractices: PracticeSummary[] = recentRaw
+              .filter((p) => p && typeof p === 'object')
+              .slice(0, 10)
+              .map((p: Record<string, unknown>) => ({
+                title: String(p.title || 'Coding Practice'),
+                platform: (CODING_PLATFORMS.includes(String(p.platform) as CodingPlatform)
+                  ? String(p.platform)
+                  : 'HackerRank') as CodingPlatform,
+                date: String(p.date || ''),
+                count: Number(p.count || 1),
+                ...(p.notesUrl ? { notesUrl: sanitizeOptionalDocUrl(String(p.notesUrl)) } : {}),
+              }));
             return {
               id: d.id,
               uid: String(x.uid || d.id),
@@ -1133,6 +1430,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               year: String(x.year || ''),
               bio: String(x.bio || ''),
               photoUrl: sanitizeImageUrl(String(x.photoUrl || '')),
+              documentUrl: sanitizeOptionalDocUrl(String(x.documentUrl || '')),
               skills: Array.isArray(x.skills) ? x.skills.map(String) : [],
               hackerRankHandle: String(x.hackerRankHandle || ''),
               hackerRankUrl: x.hackerRankUrl ? String(x.hackerRankUrl) : '',
@@ -1140,6 +1438,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               linkedinUrl: x.linkedinUrl ? String(x.linkedinUrl) : '',
               completedDsaCount: Number(x.completedDsaCount || 0),
               completedRoadmapCount: Number(x.completedRoadmapCount || 0),
+              hackerRankSolvedCount: Number(x.hackerRankSolvedCount || 0),
+              streak: Number(x.streak || 0),
+              lastPracticeAt: x.lastPracticeAt ? String(x.lastPracticeAt) : '',
+              recentPractices,
+              rank: typeof x.rank === 'number' ? x.rank : undefined,
+              eventsAttended: Number(x.eventsAttended || 0),
               updatedAt: x.updatedAt ? String(x.updatedAt) : undefined,
             };
           })
@@ -1187,6 +1491,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               department: String(x.department || ''),
               year: String(x.year || ''),
               registeredAt: String(x.registeredAt || ''),
+              ticketCode: x.ticketCode ? String(x.ticketCode) : undefined,
+              ticketEmailStatus:
+                x.ticketEmailStatus === 'sent' ||
+                x.ticketEmailStatus === 'queued' ||
+                x.ticketEmailStatus === 'failed'
+                  ? x.ticketEmailStatus
+                  : undefined,
+              ticketEmailSentAt: x.ticketEmailSentAt ? String(x.ticketEmailSentAt) : undefined,
             };
           })
         );
@@ -1219,6 +1531,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 eventTitle: String(x.eventTitle || ''),
                 venue: String(x.venue || ''),
                 isActive: Boolean(x.isActive),
+                opensAt: x.opensAt,
+                closesAt: x.closesAt,
                 createdByUid: String(x.createdByUid || ''),
                 createdByName: String(x.createdByName || ''),
                 createdAt: String(x.createdAt || ''),
@@ -1271,6 +1585,87 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [authReady, firebaseUser, isVerifiedAllowedUser, isRealCrewOrLead]);
 
+  // Authenticated listeners: /unstop_participants (Crew/Lead only) & /certificates (Crew/Lead all; Student own)
+  useEffect(() => {
+    if (!authReady || !firebaseUser || !isVerifiedAllowedUser) {
+      setUnstopParticipants([]);
+      setCertificates([]);
+      return;
+    }
+
+    let unsubUnstop: (() => void) | undefined;
+    if (isRealCrewOrLead) {
+      unsubUnstop = onSnapshot(
+        collection(db, 'unstop_participants'),
+        (snap) => {
+          const loaded: UnstopParticipant[] = snap.docs
+            .map((d) => {
+              const x = d.data();
+              return {
+                id: d.id,
+                eventId: String(x.eventId || ''),
+                eventTitle: String(x.eventTitle || ''),
+                name: String(x.name || ''),
+                email: String(x.email || ''),
+                registerNumber: x.registerNumber ? String(x.registerNumber) : undefined,
+                college: x.college ? String(x.college) : undefined,
+                teamName: x.teamName ? String(x.teamName) : undefined,
+                status: x.status ? String(x.status) : undefined,
+                phone: x.phone ? String(x.phone) : undefined,
+                matchedUserId: x.matchedUserId ? String(x.matchedUserId) : undefined,
+                importedAt: String(x.importedAt || ''),
+                importedByUid: String(x.importedByUid || ''),
+                importedByName: String(x.importedByName || ''),
+              };
+            })
+            .sort((a, b) => b.importedAt.localeCompare(a.importedAt));
+          setUnstopParticipants(loaded);
+        },
+        (error) => handleFirestoreError(error, OperationType.LIST, 'unstop_participants')
+      );
+    } else {
+      setUnstopParticipants([]);
+    }
+
+    const certQuery = isRealCrewOrLead
+      ? collection(db, 'certificates')
+      : query(collection(db, 'certificates'), where('recipientUid', '==', firebaseUser.uid));
+
+    const unsubCertificates = onSnapshot(
+      certQuery,
+      (snap) => {
+        const loaded: EventCertificate[] = snap.docs
+          .map((d) => {
+            const x = d.data();
+            return {
+              id: d.id,
+              certId: String(x.certId || d.id),
+              eventId: String(x.eventId || ''),
+              eventTitle: String(x.eventTitle || ''),
+              eventDate: String(x.eventDate || ''),
+              recipientUid: x.recipientUid ? String(x.recipientUid) : undefined,
+              recipientName: String(x.recipientName || ''),
+              registerNumber: x.registerNumber ? String(x.registerNumber) : undefined,
+              department: x.department ? String(x.department) : undefined,
+              awardType: (x.awardType as CertificateAwardType) || 'Participation',
+              awardTitle: x.awardTitle ? String(x.awardTitle) : undefined,
+              issuedAt: String(x.issuedAt || ''),
+              issuedByUid: String(x.issuedByUid || ''),
+              issuedByName: String(x.issuedByName || ''),
+            };
+          })
+          .sort((a, b) => b.issuedAt.localeCompare(a.issuedAt));
+        setCertificates(loaded);
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'certificates')
+    );
+
+    return () => {
+      if (unsubUnstop) unsubUnstop();
+      unsubCertificates();
+    };
+  }, [authReady, firebaseUser, isVerifiedAllowedUser, isRealCrewOrLead]);
+
   // Lead-only listeners: /users, /join_requests, and /emailSendAttempts
   useEffect(() => {
     if (!authReady || !firebaseUser || !isVerifiedAllowedUser || !isRealCampusLead) {
@@ -1299,6 +1694,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               year: String(x.year || ''),
               phone: String(x.phone || ''),
               photoUrl: sanitizeImageUrl(String(x.photoUrl || '')),
+              documentUrl: sanitizeOptionalDocUrl(String(x.documentUrl || '')),
               hackerRankHandle: String(x.hackerRankHandle || ''),
               hackerRankUrl: x.hackerRankUrl ? String(x.hackerRankUrl) : '',
               githubUrl: x.githubUrl ? String(x.githubUrl) : '',
@@ -1318,21 +1714,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       collection(db, 'join_requests'),
       (snap) => {
         setJoinRequests(
-          snap.docs.map((d) => {
-            const x = d.data();
-            return {
-              id: d.id,
-              name: String(x.name || ''),
-              registerNumber: String(x.registerNumber || ''),
-              department: String(x.department || ''),
-              year: String(x.year || ''),
-              email: String(x.email || ''),
-              phone: String(x.phone || ''),
-              skills: String(x.skills || ''),
-              submittedAt: String(x.submittedAt || ''),
-              status: (x.status as JoinRequest['status']) || 'pending',
-            };
-          })
+          snap.docs
+            .map((d) => {
+              const x = d.data();
+              const rawEmailStatus = x.emailNotificationStatus;
+              const emailNotificationStatus: JoinRequest['emailNotificationStatus'] =
+                rawEmailStatus === 'sent' ||
+                rawEmailStatus === 'queued' ||
+                rawEmailStatus === 'failed'
+                  ? rawEmailStatus
+                  : undefined;
+              return {
+                id: d.id,
+                name: String(x.name || ''),
+                registerNumber: String(x.registerNumber || ''),
+                department: String(x.department || ''),
+                year: String(x.year || ''),
+                email: String(x.email || ''),
+                phone: String(x.phone || ''),
+                skills: String(x.skills || ''),
+                submittedAt: String(x.submittedAt || ''),
+                status: (x.status as JoinRequest['status']) || 'pending',
+                reviewedAt: x.reviewedAt ? String(x.reviewedAt) : undefined,
+                reviewedByUid: x.reviewedByUid ? String(x.reviewedByUid) : undefined,
+                reviewNote: x.reviewNote ? String(x.reviewNote) : undefined,
+                emailNotificationStatus,
+                emailSentAt: x.emailSentAt ? String(x.emailSentAt) : undefined,
+                emailError: x.emailError ? String(x.emailError) : undefined,
+              };
+            })
+            .sort((a, b) => b.id.localeCompare(a.id))
         );
       },
       (error) => handleFirestoreError(error, OperationType.LIST, 'join_requests')
@@ -1346,7 +1757,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const x = d.data();
             return {
               id: d.id,
-              type: (x.type === 'password_reset' ? 'password_reset' : 'verification') as EmailSendAttempt['type'],
+              type: normalizeEmailAttemptType(x.type),
               email: String(x.email || ''),
               status: (x.status === 'failed' ? 'failed' : 'sent') as EmailSendAttempt['status'],
               errorCode: x.errorCode ? String(x.errorCode) : undefined,
@@ -1951,6 +2362,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           payload.hackerRankHandle || `@${trimmedEmail.split('@')[0].slice(0, 20)}`,
           60
         ),
+        ...(payload.joinReqId ? { joinReqId: sanitizeId(payload.joinReqId) } : {}),
       };
 
       savePendingMeta(cred.user.uid, pendingMeta);
@@ -2403,17 +2815,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // ---------------- EVENTS CRUD ----------------
+  const buildAutoEventCheckInCodeId = (eventId: string) =>
+    sanitizeId(`HRCC-${eventId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6).toUpperCase()}`);
+
+  const sanitizeOptionalMeetingUrl = (raw?: string): string => {
+    const trimmed = (raw || '').trim();
+    if (!trimmed) return '';
+    return /^https?:\/\/.+/.test(trimmed) ? clampStr(trimmed, 500) : '';
+  };
+
   const createEvent: AppContextValue['createEvent'] = async (eventInput) => {
     if (!can('canCreateEvents') || !currentUser || !firebaseUser) return;
     const autoApprove = can('canPublishEventsDirectly');
     const id = `evt_${Date.now()}`;
     const path = `events/${id}`;
+    const nowISO = new Date().toISOString();
+    const safeTitle = ensureMinLen(eventInput.title, 'Campus Coding Event', 3, 140);
+    const resolvedMode: EventMode =
+      eventInput.eventMode === 'online' ||
+      eventInput.eventMode === 'hybrid' ||
+      eventInput.eventMode === 'offline'
+        ? eventInput.eventMode
+        : getEffectiveEventMode(eventInput);
+    const onlineEvent = resolvedMode === 'online';
+    const resolvedAttendanceEnabled = onlineEvent ? Boolean(eventInput.attendanceEnabled) : true;
+    const safeVenue = ensureMinLen(
+      eventInput.venue,
+      onlineEvent ? 'Online (Virtual Session)' : 'Paavai Campus',
+      2,
+      160
+    );
+    const safeDateISO = clampStr(eventInput.dateISO, 40);
+    const safeDocUrl = sanitizeOptionalDocUrl(eventInput.documentUrl);
+    const safeMeetingUrl = sanitizeOptionalMeetingUrl(eventInput.meetingUrl);
+    const rawUnstopUrl = (eventInput.unstopUrl || '').trim();
+    const safeUnstopUrl = /^https:\/\/(www\.)?unstop\.com\/.+$/.test(rawUnstopUrl)
+      ? clampStr(rawUnstopUrl, 500)
+      : '';
     try {
-      await setDoc(doc(db, 'events', id), {
-        title: ensureMinLen(eventInput.title, 'Campus Coding Event', 3, 140),
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'events', id), {
+        title: safeTitle,
         category: eventInput.category,
-        dateISO: clampStr(eventInput.dateISO, 40),
-        venue: ensureMinLen(eventInput.venue, 'Paavai Campus', 2, 160),
+        dateISO: safeDateISO,
+        venue: safeVenue,
         description: ensureMinLen(eventInput.description, 'Campus Crew event', 5, 1000),
         membersOnly: Boolean(eventInput.membersOnly),
         capacity: Math.min(5000, Math.max(1, Number(eventInput.capacity) || 100)),
@@ -2421,11 +2866,113 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         createdByUid: firebaseUser.uid,
         createdByName: ensureMinLen(currentUser.name, 'Campus Crew', 2, 100),
         createdByRole: currentUser.role,
-        bannerImage: clampStr(eventInput.bannerImage || '/src/assets/images/gallery_hackathon_arena_1795100082455.jpg', 500),
-        updatedAt: new Date().toISOString(),
+        bannerImage: clampStr(
+          eventInput.bannerImage || '/src/assets/images/gallery_hackathon_arena_1795100082455.jpg',
+          500
+        ),
+        eventMode: resolvedMode,
+        attendanceEnabled: resolvedAttendanceEnabled,
+        ...(safeMeetingUrl ? { meetingUrl: safeMeetingUrl } : {}),
+        ...(safeDocUrl ? { documentUrl: safeDocUrl } : {}),
+        ...(safeUnstopUrl ? { unstopUrl: safeUnstopUrl } : {}),
+        ...(eventInput.unstopCompetitionId
+          ? { unstopCompetitionId: clampStr(eventInput.unstopCompetitionId, 40) }
+          : {}),
+        ...(typeof eventInput.unstopRegistrationsCount === 'number' &&
+        Number.isFinite(eventInput.unstopRegistrationsCount)
+          ? {
+              unstopRegistrationsCount: Math.min(
+                1000000,
+                Math.max(0, Math.round(eventInput.unstopRegistrationsCount))
+              ),
+            }
+          : {}),
+        ...(typeof eventInput.unstopViewsCount === 'number' &&
+        Number.isFinite(eventInput.unstopViewsCount)
+          ? {
+              unstopViewsCount: Math.min(
+                10000000,
+                Math.max(0, Math.round(eventInput.unstopViewsCount))
+              ),
+            }
+          : {}),
+        ...(eventInput.unstopDeadline
+          ? { unstopDeadline: clampStr(eventInput.unstopDeadline, 60) }
+          : {}),
+        ...(eventInput.unstopOrganiser
+          ? { unstopOrganiser: clampStr(eventInput.unstopOrganiser, 140) }
+          : {}),
+        ...(eventInput.unstopMode ? { unstopMode: clampStr(eventInput.unstopMode, 60) } : {}),
+        ...(eventInput.unstopPrize ? { unstopPrize: clampStr(eventInput.unstopPrize, 140) } : {}),
+        ...(eventInput.unstopSyncedAt
+          ? { unstopSyncedAt: clampStr(eventInput.unstopSyncedAt, 40) }
+          : {}),
+        updatedAt: nowISO,
       });
+
+      if (autoApprove) {
+        const annId = sanitizeId(`ann_evt_${id}`);
+        if (!onlineEvent) {
+          const autoCode = buildAutoEventCheckInCodeId(id);
+          const { opensAt, closesAt } = computeEventCheckInWindow(safeDateISO);
+          batch.set(doc(db, 'event_checkin_codes', autoCode), {
+            code: autoCode,
+            eventId: id,
+            eventTitle: safeTitle,
+            venue: safeVenue,
+            isActive: true,
+            opensAt,
+            closesAt,
+            createdByUid: sanitizeId(firebaseUser.uid),
+            createdByName: ensureMinLen(currentUser.name, 'Campus Lead', 2, 100),
+            createdAt: nowISO,
+          });
+
+          batch.set(doc(db, 'announcements', annId), {
+            title: ensureMinLen(`New Event: ${safeTitle}`, 'New Campus Event', 3, 140),
+            message: ensureMinLen(
+              `${safeTitle} (${eventInput.category}) is live! Venue: ${safeVenue}. Register now and use check-in QR code ${autoCode} at the venue to earn +50 leaderboard pts.`,
+              'New event published on the HRCC Paavai portal.',
+              5,
+              1000
+            ),
+            date: nowISO.slice(0, 10),
+            priority: 'Important',
+            status: 'approved',
+            createdByUid: sanitizeId(firebaseUser.uid),
+            createdByName: ensureMinLen(currentUser.name, 'Campus Lead', 2, 100),
+            updatedAt: nowISO,
+          });
+        } else {
+          batch.set(doc(db, 'announcements', annId), {
+            title: ensureMinLen(`New Online Event: ${safeTitle}`, 'New Online Event', 3, 140),
+            message: ensureMinLen(
+              `${safeTitle} (${eventInput.category} · Online) is live! Register on the event page — no QR check-in is required.${
+                resolvedAttendanceEnabled
+                  ? ' Online attendance marking is enabled for participants.'
+                  : ''
+              }`,
+              'New online event published on the HRCC Paavai portal.',
+              5,
+              1000
+            ),
+            date: nowISO.slice(0, 10),
+            priority: 'Important',
+            status: 'approved',
+            createdByUid: sanitizeId(firebaseUser.uid),
+            createdByName: ensureMinLen(currentUser.name, 'Campus Lead', 2, 100),
+            updatedAt: nowISO,
+          });
+        }
+      }
+
+      await batch.commit();
       addToast(
-        autoApprove ? 'Event published' : 'Event submitted for approval',
+        autoApprove
+          ? onlineEvent
+            ? 'Online event published (no QR check-in)'
+            : 'Event published with auto QR & announcement'
+          : 'Event submitted for approval',
         eventInput.title,
         autoApprove ? 'success' : 'info'
       );
@@ -2461,12 +3008,193 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (updates.bannerImage !== undefined && updates.bannerImage.trim()) {
       sanitizedUpdates.bannerImage = clampStr(updates.bannerImage, 500);
     }
+    if (updates.documentUrl !== undefined) {
+      sanitizedUpdates.documentUrl = sanitizeOptionalDocUrl(updates.documentUrl);
+    }
+    if (
+      updates.eventMode === 'offline' ||
+      updates.eventMode === 'online' ||
+      updates.eventMode === 'hybrid'
+    ) {
+      sanitizedUpdates.eventMode = updates.eventMode;
+    }
+    if (updates.attendanceEnabled !== undefined) {
+      sanitizedUpdates.attendanceEnabled = Boolean(updates.attendanceEnabled);
+    }
+    if (updates.meetingUrl !== undefined) {
+      sanitizedUpdates.meetingUrl = sanitizeOptionalMeetingUrl(updates.meetingUrl);
+    }
+    if (updates.unstopUrl !== undefined) {
+      const trimmed = updates.unstopUrl.trim();
+      sanitizedUpdates.unstopUrl =
+        trimmed === ''
+          ? ''
+          : /^https:\/\/(www\.)?unstop\.com\/.+$/.test(trimmed)
+            ? clampStr(trimmed, 500)
+            : '';
+    }
+    if (updates.unstopCompetitionId !== undefined) {
+      sanitizedUpdates.unstopCompetitionId = clampStr(updates.unstopCompetitionId, 40);
+    }
+    if (
+      updates.unstopRegistrationsCount !== undefined &&
+      Number.isFinite(updates.unstopRegistrationsCount)
+    ) {
+      sanitizedUpdates.unstopRegistrationsCount = Math.min(
+        1000000,
+        Math.max(0, Math.round(updates.unstopRegistrationsCount))
+      );
+    }
+    if (updates.unstopViewsCount !== undefined && Number.isFinite(updates.unstopViewsCount)) {
+      sanitizedUpdates.unstopViewsCount = Math.min(
+        10000000,
+        Math.max(0, Math.round(updates.unstopViewsCount))
+      );
+    }
+    if (updates.unstopDeadline !== undefined) {
+      sanitizedUpdates.unstopDeadline = clampStr(updates.unstopDeadline, 60);
+    }
+    if (updates.unstopOrganiser !== undefined) {
+      sanitizedUpdates.unstopOrganiser = clampStr(updates.unstopOrganiser, 140);
+    }
+    if (updates.unstopMode !== undefined) {
+      sanitizedUpdates.unstopMode = clampStr(updates.unstopMode, 60);
+    }
+    if (updates.unstopPrize !== undefined) {
+      sanitizedUpdates.unstopPrize = clampStr(updates.unstopPrize, 140);
+    }
+    if (updates.unstopSyncedAt !== undefined) {
+      sanitizedUpdates.unstopSyncedAt = clampStr(updates.unstopSyncedAt, 40);
+    }
 
     try {
       await updateDoc(doc(db, 'events', id), sanitizedUpdates);
       addToast('Event updated', 'Saved to Firestore.', 'success');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, path);
+    }
+  };
+
+  const toggleOnlineEventAttendance: AppContextValue['toggleOnlineEventAttendance'] = async (
+    eventId,
+    enabled
+  ) => {
+    if (!can('canEditDeleteAnyEvent') || !firebaseUser) {
+      addToast(
+        'Admin access required',
+        'Only the Campus Lead / Admin can toggle online attendance for participants.',
+        'error'
+      );
+      return;
+    }
+    const targetEvent = events.find((e) => e.id === eventId);
+    const path = `events/${eventId}`;
+    try {
+      await updateDoc(doc(db, 'events', eventId), {
+        eventMode: 'online',
+        attendanceEnabled: enabled,
+        updatedAt: new Date().toISOString(),
+      });
+      addToast(
+        enabled ? 'Online attendance enabled' : 'Online attendance disabled',
+        enabled
+          ? `Registered participants for "${targetEvent?.title || 'this event'}" can now mark attendance directly on the event page.`
+          : `Participant attendance marking is turned off for "${targetEvent?.title || 'this event'}".`,
+        enabled ? 'success' : 'info'
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+    }
+  };
+
+  const fetchUnstopEventDetails: AppContextValue['fetchUnstopEventDetails'] = async (unstopUrl) => {
+    if (!can('canCreateEvents') || !firebaseUser) {
+      return { ok: false, error: 'Only verified Campus Crew or Campus Lead can fetch Unstop data.' };
+    }
+    const trimmed = unstopUrl.trim();
+    if (!trimmed) {
+      return { ok: false, error: 'Enter an Unstop event link (https://unstop.com/...).' };
+    }
+    try {
+      const idToken = await firebaseUser.getIdToken();
+      const res = await fetch('/api/unstop/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ unstopUrl: trimmed }),
+      });
+      const contentType = res.headers.get('content-type') || '';
+      const payload = contentType.includes('application/json')
+        ? ((await res.json()) as { ok?: boolean; data?: UnstopSyncedEventDetails; error?: string })
+        : null;
+
+      if (!res.ok || !payload?.ok || !payload.data) {
+        const msg =
+          payload?.error || `Unstop sync request failed (HTTP ${res.status}). Check the link and try again.`;
+        addToast('Unstop sync failed', msg, 'error');
+        return { ok: false, error: msg };
+      }
+
+      addToast(
+        'Unstop details fetched',
+        `${payload.data.title || 'Event'} · ${payload.data.unstopRegistrationsCount.toLocaleString('en-IN')} Unstop registrations`,
+        'success'
+      );
+      return { ok: true, data: payload.data };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Network error connecting to Unstop proxy.';
+      addToast('Unstop sync error', msg, 'error');
+      return { ok: false, error: msg };
+    }
+  };
+
+  const syncEventFromUnstop: AppContextValue['syncEventFromUnstop'] = async (
+    eventId,
+    unstopUrlOverride
+  ) => {
+    if (!can('canCreateEvents') || !firebaseUser) {
+      return { ok: false, error: 'Only verified Campus Crew or Campus Lead can sync Unstop events.' };
+    }
+    const targetEvent = events.find((e) => e.id === eventId);
+    const urlToSync = (unstopUrlOverride || targetEvent?.unstopUrl || '').trim();
+    if (!urlToSync) {
+      return { ok: false, error: 'No Unstop URL linked to this event.' };
+    }
+
+    const fetched = await fetchUnstopEventDetails(urlToSync);
+    if (!fetched.ok || !fetched.data) {
+      return fetched;
+    }
+
+    const data = fetched.data;
+    const path = `events/${eventId}`;
+    try {
+      await updateDoc(doc(db, 'events', eventId), {
+        unstopUrl: clampStr(data.unstopUrl, 500),
+        unstopCompetitionId: clampStr(data.unstopCompetitionId, 40),
+        unstopRegistrationsCount: Math.min(
+          1000000,
+          Math.max(0, Math.round(data.unstopRegistrationsCount))
+        ),
+        unstopViewsCount: Math.min(10000000, Math.max(0, Math.round(data.unstopViewsCount))),
+        unstopDeadline: clampStr(data.unstopDeadline || '', 60),
+        unstopOrganiser: clampStr(data.unstopOrganiser || '', 140),
+        unstopMode: clampStr(data.unstopMode || '', 60),
+        unstopPrize: clampStr(data.unstopPrize || '', 140),
+        unstopSyncedAt: clampStr(data.unstopSyncedAt, 40),
+        updatedAt: new Date().toISOString(),
+      });
+      addToast(
+        'Event synced with Unstop',
+        `${data.unstopRegistrationsCount.toLocaleString('en-IN')} registrations · Updated in Firestore.`,
+        'success'
+      );
+      return { ok: true, data };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+      return { ok: false, error: 'Failed to save Unstop sync data to Firestore.' };
     }
   };
 
@@ -2482,8 +3210,94 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const approveEvent = async (id: string) => {
-    if (!can('canApproveContent')) return;
-    await updateEvent(id, { status: 'approved' });
+    if (!can('canApproveContent') || !firebaseUser || !currentUser) return;
+    const targetEvent = events.find((e) => e.id === id);
+    const nowISO = new Date().toISOString();
+    const path = `events/${id}`;
+    const onlineEvent = isOnlineEvent(targetEvent);
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'events', id), {
+        status: 'approved',
+        updatedAt: nowISO,
+      });
+
+      if (targetEvent) {
+        const safeTitle = ensureMinLen(targetEvent.title, 'Campus Event', 2, 140);
+        const safeVenue = ensureMinLen(
+          targetEvent.venue,
+          onlineEvent ? 'Online (Virtual Session)' : 'Paavai Campus',
+          2,
+          160
+        );
+        const annId = sanitizeId(`ann_evt_${id}`);
+
+        if (!onlineEvent) {
+          const autoCode = buildAutoEventCheckInCodeId(id);
+          const { opensAt, closesAt } = computeEventCheckInWindow(targetEvent.dateISO);
+
+          batch.set(doc(db, 'event_checkin_codes', autoCode), {
+            code: autoCode,
+            eventId: sanitizeId(id),
+            eventTitle: safeTitle,
+            venue: safeVenue,
+            isActive: true,
+            opensAt,
+            closesAt,
+            createdByUid: sanitizeId(firebaseUser.uid),
+            createdByName: ensureMinLen(currentUser.name, 'Campus Lead', 2, 100),
+            createdAt: nowISO,
+          });
+
+          batch.set(doc(db, 'announcements', annId), {
+            title: ensureMinLen(`Event Approved: ${safeTitle}`, 'Campus Event Live', 3, 140),
+            message: ensureMinLen(
+              `${safeTitle} (${targetEvent.category}) is now open for registration at ${safeVenue}. Scan QR code ${autoCode} during the event window to earn +50 leaderboard pts.`,
+              'New event approved and published.',
+              5,
+              1000
+            ),
+            date: nowISO.slice(0, 10),
+            priority: 'Important',
+            status: 'approved',
+            createdByUid: sanitizeId(firebaseUser.uid),
+            createdByName: ensureMinLen(currentUser.name, 'Campus Lead', 2, 100),
+            updatedAt: nowISO,
+          });
+        } else {
+          batch.set(doc(db, 'announcements', annId), {
+            title: ensureMinLen(`Online Event Approved: ${safeTitle}`, 'Online Event Live', 3, 140),
+            message: ensureMinLen(
+              `${safeTitle} (${targetEvent.category} · Online) is now open for registration. No QR check-in is needed.${
+                isOnlineAttendanceEnabled(targetEvent)
+                  ? ' Online attendance marking is enabled for participants.'
+                  : ''
+              }`,
+              'New online event approved and published.',
+              5,
+              1000
+            ),
+            date: nowISO.slice(0, 10),
+            priority: 'Important',
+            status: 'approved',
+            createdByUid: sanitizeId(firebaseUser.uid),
+            createdByName: ensureMinLen(currentUser.name, 'Campus Lead', 2, 100),
+            updatedAt: nowISO,
+          });
+        }
+      }
+
+      await batch.commit();
+      addToast(
+        'Event approved',
+        onlineEvent
+          ? 'Online event published with campus announcement (QR check-in skipped).'
+          : 'Auto-generated time-windowed QR code & campus announcement.',
+        'success'
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+    }
   };
 
   const rejectEvent = async (id: string) => {
@@ -2562,6 +3376,79 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // ---------------- REGISTRATIONS ----------------
+  const dispatchTicketEmailRequest = async (params: {
+    registrationId: string;
+    event: CampusEvent;
+    userId: string;
+    userName: string;
+    userEmail: string;
+    registerNumber: string;
+    department: string;
+    year: string;
+    ticketCode: string;
+  }): Promise<{ ok: boolean; delivered: boolean; reason?: string; message?: string }> => {
+    if (!firebaseUser) {
+      return { ok: false, delivered: false, reason: 'unauthorized', message: 'Not authenticated.' };
+    }
+    try {
+      const idToken = await firebaseUser.getIdToken();
+      const response = await fetch('/api/events/send-ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          eventId: params.event.id,
+          eventTitle: params.event.title,
+          eventCategory: params.event.category,
+          eventDateISO: params.event.dateISO,
+          venue: params.event.venue,
+          attendeeUid: params.userId,
+          attendeeName: params.userName,
+          attendeeEmail: params.userEmail,
+          registerNumber: params.registerNumber,
+          department: params.department,
+          year: params.year,
+          ticketCode: params.ticketCode,
+          portalUrl: typeof window !== 'undefined' ? window.location.origin : '',
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        delivered?: boolean;
+        reason?: string;
+        message?: string;
+      };
+      const delivered = Boolean(response.ok && data.delivered);
+      const statusToSave: 'sent' | 'failed' = delivered ? 'sent' : 'failed';
+      await updateDoc(doc(db, 'registrations', params.registrationId), {
+        ticketCode: params.ticketCode,
+        ticketEmailStatus: statusToSave,
+        ticketEmailSentAt: delivered ? new Date().toISOString() : '',
+      }).catch(() => {});
+
+      return {
+        ok: delivered,
+        delivered,
+        reason: data.reason,
+        message: data.message,
+      };
+    } catch (err) {
+      await updateDoc(doc(db, 'registrations', params.registrationId), {
+        ticketCode: params.ticketCode,
+        ticketEmailStatus: 'failed',
+        ticketEmailSentAt: '',
+      }).catch(() => {});
+      return {
+        ok: false,
+        delivered: false,
+        reason: 'network_error',
+        message: err instanceof Error ? err.message : 'Network error sending QR pass email.',
+      };
+    }
+  };
+
   const registerForEvent = async (eventId: string) => {
     if (!currentUser || !firebaseUser || !can('canRegisterForEvents')) {
       addToast(
@@ -2585,10 +3472,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    const regId = sanitizeId(`reg_${eventId}_${currentUser.id}`);
-    const payload = {
-      eventId: sanitizeId(eventId),
-      userId: sanitizeId(currentUser.id),
+    const safeEventId = sanitizeId(eventId);
+    const safeUserId = sanitizeId(currentUser.id);
+    const regId = sanitizeId(`reg_${safeEventId}_${safeUserId}`);
+    const onlineEvent = isOnlineEvent(target);
+    const basePayload = {
+      eventId: safeEventId,
+      userId: safeUserId,
       userName: ensureMinLen(currentUser.name, 'Paavai Student', 2, 100),
       userEmail: clampStr(currentUser.email, 160),
       registerNumber: ensureMinLen(currentUser.regNo || 'PEC-MEMBER', 'PEC-MEMBER', 4, 20),
@@ -2597,13 +3487,123 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       registeredAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
     };
 
+    const ticketCode = onlineEvent ? '' : buildAttendeeTicketCode(safeEventId, safeUserId);
+    const payload = onlineEvent
+      ? basePayload
+      : {
+          ...basePayload,
+          ticketCode,
+          ticketEmailStatus: 'queued' as const,
+          ticketEmailSentAt: '',
+        };
+
     const path = `registrations/${regId}`;
     try {
       await setDoc(doc(db, 'registrations', regId), payload);
-      addToast('Registration confirmed', `Seat reserved for "${target.title}".`, 'success');
+
+      if (onlineEvent) {
+        addToast(
+          'RSVP confirmed (Online Event)',
+          `Seat reserved for "${target.title}". No QR check-in is needed for this online event.`,
+          'success'
+        );
+        return;
+      }
+
+      addToast(
+        'Registration confirmed',
+        `Seat reserved for "${target.title}". Sending your unique Entry Pass QR (${ticketCode}) to ${payload.userEmail}...`,
+        'success'
+      );
+
+      const mailRes = await dispatchTicketEmailRequest({
+        registrationId: regId,
+        event: target,
+        userId: safeUserId,
+        userName: payload.userName,
+        userEmail: payload.userEmail,
+        registerNumber: payload.registerNumber,
+        department: payload.department,
+        year: payload.year,
+        ticketCode,
+      });
+
+      if (mailRes.delivered) {
+        addToast(
+          'Unique QR Pass Emailed',
+          `Check ${payload.userEmail} for your scannable entry pass (${ticketCode}). Also saved on your Profile.`,
+          'success'
+        );
+      } else {
+        addToast(
+          'Entry QR Pass Ready on Profile',
+          mailRes.reason === 'mail_not_configured'
+            ? `Email transport is not configured yet — open your unique QR pass (${ticketCode}) anytime on your Profile page.`
+            : `Could not email QR pass right now — open or download ${ticketCode} anytime from your Profile page.`,
+          'info'
+        );
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, path);
     }
+  };
+
+  const resendEventTicketEmail: AppContextValue['resendEventTicketEmail'] = async (
+    registrationId
+  ) => {
+    if (!firebaseUser || !currentUser) {
+      return { ok: false, delivered: false, message: 'Sign in required.' };
+    }
+    const reg = registrations.find((r) => r.id === registrationId);
+    if (!reg) {
+      addToast('Registration not found', 'Could not locate that registration record.', 'error');
+      return { ok: false, delivered: false, message: 'Registration not found.' };
+    }
+    if (!can('canAccessCrewDashboard') && reg.userId !== firebaseUser.uid) {
+      addToast('Permission denied', 'You can only email your own Event Entry Pass QR.', 'error');
+      return { ok: false, delivered: false, message: 'Permission denied.' };
+    }
+    const targetEvent = events.find((e) => e.id === reg.eventId);
+    if (!targetEvent) {
+      addToast('Event not found', 'Associated campus event could not be loaded.', 'error');
+      return { ok: false, delivered: false, message: 'Event not found.' };
+    }
+    if (isOnlineEvent(targetEvent)) {
+      addToast('No QR pass needed', 'Online events do not require QR check-in passes.', 'info');
+      return {
+        ok: false,
+        delivered: false,
+        message: 'Online events do not require QR check-in passes.',
+      };
+    }
+
+    const ticketCode = reg.ticketCode || buildAttendeeTicketCode(reg.eventId, reg.userId);
+    const mailRes = await dispatchTicketEmailRequest({
+      registrationId: reg.id,
+      event: targetEvent,
+      userId: reg.userId,
+      userName: reg.userName,
+      userEmail: reg.userEmail,
+      registerNumber: reg.registerNumber,
+      department: reg.department,
+      year: reg.year,
+      ticketCode,
+    });
+
+    if (mailRes.delivered) {
+      addToast(
+        'Entry Pass QR Sent',
+        `Emailed unique QR pass (${ticketCode}) to ${reg.userEmail}.`,
+        'success'
+      );
+    } else {
+      addToast(
+        'Email Not Delivered',
+        mailRes.message || 'Mail server not configured yet. Download the QR directly from the pass modal.',
+        'error'
+      );
+    }
+    return mailRes;
   };
 
   const cancelRegistration = async (eventId: string) => {
@@ -2690,6 +3690,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!targetEvent) {
       return { ok: false, error: 'Selected event was not found.' };
     }
+    if (isOnlineEvent(targetEvent)) {
+      return {
+        ok: false,
+        error:
+          'QR check-in is disabled for online events. Use the Admin Online Attendance toggle on the event instead.',
+      };
+    }
 
     const eventSlug = targetEvent.title
       .replace(/[^a-zA-Z0-9]+/g, '')
@@ -2702,12 +3709,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .join('');
     const uniqueCode = sanitizeId(`HRCC-${eventSlug}-${randomHex}`).slice(0, 64);
 
+    const { opensAt, closesAt } = computeEventCheckInWindow(targetEvent.dateISO);
     const payload: EventCheckInCode = {
       code: uniqueCode,
       eventId: sanitizeId(targetEvent.id),
       eventTitle: ensureMinLen(targetEvent.title, 'Campus Event', 2, 140),
       venue: ensureMinLen(targetEvent.venue, 'Paavai Campus', 2, 160),
       isActive: true,
+      opensAt,
+      closesAt,
       createdByUid: sanitizeId(firebaseUser.uid),
       createdByName: ensureMinLen(currentUser.name, 'Campus Organizer', 2, 100),
       createdAt: new Date().toISOString(),
@@ -2779,6 +3789,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         eventTitle: String(x.eventTitle || ''),
         venue: String(x.venue || ''),
         isActive: Boolean(x.isActive),
+        opensAt: x.opensAt,
+        closesAt: x.closesAt,
         createdByUid: String(x.createdByUid || ''),
         createdByName: String(x.createdByName || ''),
         createdAt: String(x.createdAt || ''),
@@ -2810,7 +3822,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
-    const checkInId = sanitizeId(`${codeDoc.code}_${firebaseUser.uid}`);
+    const nowMs = Date.now();
+    const opensMs = toTimestampMs(codeDoc.opensAt);
+    const closesMs = toTimestampMs(codeDoc.closesAt);
+    if (opensMs !== null && nowMs < opensMs) {
+      return {
+        ok: false,
+        error: `Check-in opens at ${new Date(opensMs).toLocaleString('en-IN')} (30 mins before event start).`,
+      };
+    }
+    if (closesMs !== null && nowMs > closesMs) {
+      return {
+        ok: false,
+        error: `Check-in window closed at ${new Date(closesMs).toLocaleString('en-IN')}.`,
+      };
+    }
+
+    const safeEventId = sanitizeId(codeDoc.eventId);
+    const checkInId = sanitizeId(`${safeEventId}_${firebaseUser.uid}`);
     const path = `event_checkins/${checkInId}`;
 
     try {
@@ -2838,9 +3867,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       }
 
+      const nowISO = new Date().toISOString();
       const payload = {
         checkInCode: codeDoc.code,
-        eventId: sanitizeId(codeDoc.eventId),
+        eventId: safeEventId,
         eventTitle: ensureMinLen(codeDoc.eventTitle, 'Campus Event', 2, 140),
         userId: sanitizeId(firebaseUser.uid),
         userName: ensureMinLen(currentUser.name, 'Paavai Student', 2, 100),
@@ -2855,11 +3885,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         department: ensureMinLen(currentUser.department || 'CSE', 'CSE', 2, 40),
         year: ensureMinLen(currentUser.year || '1st Year', '1st Year', 2, 20),
         phone: clampStr(currentUser.phone || '', 20),
-        checkedInAt: new Date().toISOString(),
+        checkedInAt: nowISO,
       };
 
-      await setDoc(doc(db, 'event_checkins', checkInId), payload);
-      addToast('Check-in recorded', `Checked into "${codeDoc.eventTitle}".`, 'success');
+      const [lbSnap, pubSnap] = await Promise.all([
+        getDoc(doc(db, 'leaderboard', firebaseUser.uid)).catch(() => null),
+        getDoc(doc(db, 'public_profiles', firebaseUser.uid)).catch(() => null),
+      ]);
+      const prevLb = lbSnap?.exists() ? lbSnap.data() : null;
+      const prevPub = pubSnap?.exists() ? pubSnap.data() : null;
+
+      const prevScore = Number(prevLb?.score || 0);
+      const prevSolved = Number(prevLb?.problemsSolved ?? prevLb?.solvedCount ?? 0);
+      const prevEventsLb = Number(prevLb?.eventsAttended || 0);
+      const prevEventsPub = Number(prevPub?.eventsAttended || 0);
+
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'event_checkins', checkInId), payload);
+
+      batch.set(
+        doc(db, 'leaderboard', firebaseUser.uid),
+        {
+          uid: sanitizeId(firebaseUser.uid),
+          name: payload.userName,
+          registerNumber: payload.registerNumber,
+          department: payload.department,
+          year: payload.year,
+          score: Math.min(1000000, prevScore + 50),
+          problemsSolved: prevSolved,
+          solvedCount: prevSolved,
+          eventsAttended: Math.min(1000, prevEventsLb + 1),
+          hackerRankHandle: clampStr(currentUser.hackerRankHandle || '@coder_pec', 60),
+          updatedAt: nowISO,
+        },
+        { merge: true }
+      );
+
+      batch.set(
+        doc(db, 'public_profiles', firebaseUser.uid),
+        {
+          uid: sanitizeId(firebaseUser.uid),
+          name: payload.userName,
+          department: payload.department,
+          year: payload.year,
+          photoUrl: sanitizeImageUrl(currentUser.photoUrl),
+          eventsAttended: Math.min(1000, prevEventsPub + 1),
+          updatedAt: nowISO,
+        },
+        { merge: true }
+      );
+
+      await batch.commit();
+      addToast(
+        'Check-in recorded (+50 pts)',
+        `Checked into "${codeDoc.eventTitle}" and awarded +50 leaderboard points.`,
+        'success'
+      );
       return {
         ok: true,
         alreadyCheckedIn: false,
@@ -2867,7 +3948,383 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, path);
-      return { ok: false, error: 'Failed to store check-in details in Firestore.' };
+      return {
+        ok: false,
+        error: 'Check-in rejected (outside active event window or already checked in).',
+      };
+    }
+  };
+
+  const markOnlineEventAttendance: AppContextValue['markOnlineEventAttendance'] = async (
+    eventId
+  ) => {
+    if (!currentUser || !firebaseUser) {
+      return {
+        ok: false,
+        error: 'Please sign in with your verified student account to mark attendance.',
+      };
+    }
+
+    const targetEvent = events.find((ev) => ev.id === eventId && ev.status === 'approved');
+    if (!targetEvent) {
+      return { ok: false, error: 'Event not found or not yet published.' };
+    }
+    if (!isOnlineEvent(targetEvent)) {
+      return {
+        ok: false,
+        error: 'This is an in-person event. Please use venue QR check-in.',
+      };
+    }
+    if (!isOnlineAttendanceEnabled(targetEvent)) {
+      return {
+        ok: false,
+        error: 'Attendance marking is not currently enabled by the admin for this online event.',
+      };
+    }
+
+    const myReg = registrations.find(
+      (r) => r.eventId === targetEvent.id && r.userId === firebaseUser.uid
+    );
+    if (!myReg) {
+      return {
+        ok: false,
+        error: 'Please RSVP for this online event before marking your attendance.',
+      };
+    }
+
+    const safeEventId = sanitizeId(targetEvent.id);
+    const checkInId = sanitizeId(`${safeEventId}_${firebaseUser.uid}`);
+    const path = `event_checkins/${checkInId}`;
+
+    try {
+      const existingSnap = await getDoc(doc(db, 'event_checkins', checkInId));
+      if (existingSnap.exists()) {
+        const x = existingSnap.data();
+        return {
+          ok: true,
+          alreadyMarked: true,
+          checkIn: {
+            id: existingSnap.id,
+            checkInCode: String(x.checkInCode || 'ONLINE-ATTENDANCE'),
+            eventId: String(x.eventId || targetEvent.id),
+            eventTitle: String(x.eventTitle || targetEvent.title),
+            userId: String(x.userId || firebaseUser.uid),
+            userName: String(x.userName || currentUser.name),
+            userEmail: String(x.userEmail || currentUser.email),
+            collegeEmail: x.collegeEmail ? String(x.collegeEmail) : '',
+            registerNumber: String(x.registerNumber || currentUser.regNo),
+            department: String(x.department || currentUser.department),
+            year: String(x.year || currentUser.year),
+            phone: x.phone ? String(x.phone) : '',
+            checkedInAt: String(x.checkedInAt || ''),
+          },
+        };
+      }
+
+      const nowISO = new Date().toISOString();
+      const payload = {
+        checkInCode: 'ONLINE-ATTENDANCE',
+        eventId: safeEventId,
+        eventTitle: ensureMinLen(targetEvent.title, 'Online Event', 2, 140),
+        userId: sanitizeId(firebaseUser.uid),
+        userName: ensureMinLen(currentUser.name, 'Paavai Student', 2, 100),
+        userEmail: clampStr(currentUser.email, 160),
+        collegeEmail: currentUser.collegeEmail ? clampStr(currentUser.collegeEmail, 160) : '',
+        registerNumber: ensureMinLen(
+          (currentUser.regNo || 'PEC-MEMBER').replace(/[^A-Za-z0-9-]/g, ''),
+          'PEC-MEMBER',
+          4,
+          20
+        ),
+        department: ensureMinLen(currentUser.department || 'CSE', 'CSE', 2, 40),
+        year: ensureMinLen(currentUser.year || '1st Year', '1st Year', 2, 20),
+        phone: clampStr(currentUser.phone || '', 20),
+        checkedInAt: nowISO,
+      };
+
+      const [lbSnap, pubSnap] = await Promise.all([
+        getDoc(doc(db, 'leaderboard', firebaseUser.uid)).catch(() => null),
+        getDoc(doc(db, 'public_profiles', firebaseUser.uid)).catch(() => null),
+      ]);
+      const prevLb = lbSnap?.exists() ? lbSnap.data() : null;
+      const prevPub = pubSnap?.exists() ? pubSnap.data() : null;
+
+      const prevScore = Number(prevLb?.score || 0);
+      const prevSolved = Number(prevLb?.problemsSolved ?? prevLb?.solvedCount ?? 0);
+      const prevEventsLb = Number(prevLb?.eventsAttended || 0);
+      const prevEventsPub = Number(prevPub?.eventsAttended || 0);
+
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'event_checkins', checkInId), payload);
+
+      batch.set(
+        doc(db, 'leaderboard', firebaseUser.uid),
+        {
+          uid: sanitizeId(firebaseUser.uid),
+          name: payload.userName,
+          registerNumber: payload.registerNumber,
+          department: payload.department,
+          year: payload.year,
+          score: Math.min(1000000, prevScore + 50),
+          problemsSolved: prevSolved,
+          solvedCount: prevSolved,
+          eventsAttended: Math.min(1000, prevEventsLb + 1),
+          hackerRankHandle: clampStr(currentUser.hackerRankHandle || '@coder_pec', 60),
+          updatedAt: nowISO,
+        },
+        { merge: true }
+      );
+
+      batch.set(
+        doc(db, 'public_profiles', firebaseUser.uid),
+        {
+          uid: sanitizeId(firebaseUser.uid),
+          name: payload.userName,
+          department: payload.department,
+          year: payload.year,
+          photoUrl: sanitizeImageUrl(currentUser.photoUrl),
+          eventsAttended: Math.min(1000, prevEventsPub + 1),
+          updatedAt: nowISO,
+        },
+        { merge: true }
+      );
+
+      await batch.commit();
+      addToast(
+        'Attendance marked (+50 pts)',
+        `Online attendance recorded for "${targetEvent.title}" and +50 leaderboard points awarded.`,
+        'success'
+      );
+      return {
+        ok: true,
+        alreadyMarked: false,
+        checkIn: { id: checkInId, ...payload },
+      };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, path);
+      return {
+        ok: false,
+        error: 'Could not mark online attendance right now. Make sure you have RSVPed and attendance is enabled.',
+      };
+    }
+  };
+
+  const crewCheckInAttendeeByTicket: AppContextValue['crewCheckInAttendeeByTicket'] = async (
+    rawInput,
+    expectedEventId
+  ) => {
+    if (!can('canAccessCrewDashboard') || !firebaseUser || !currentUser) {
+      return {
+        ok: false,
+        error: 'Sign in with a Campus Crew or Campus Lead account to scan student QR passes.',
+      };
+    }
+
+    const trimmed = rawInput.trim();
+    if (!trimmed) {
+      return { ok: false, error: 'Scan a student Entry Pass QR or enter a Ticket Code / Register No.' };
+    }
+
+    let parsedEventId = '';
+    let parsedUserId = '';
+    let parsedTicketCode = '';
+
+    // Format 1: HRCC-PASS|<eventId>|<userId>|<ticketCode>
+    if (trimmed.startsWith('HRCC-PASS|')) {
+      const parts = trimmed.split('|').map((p) => p.trim());
+      parsedEventId = sanitizeId(parts[1] || '');
+      parsedUserId = sanitizeId(parts[2] || '');
+      parsedTicketCode = (parts[3] || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+    } else if (/^https?:\/\//i.test(trimmed) && trimmed.includes('ticket=')) {
+      try {
+        const u = new URL(trimmed);
+        parsedTicketCode = (u.searchParams.get('ticket') || '')
+          .replace(/[^a-zA-Z0-9_-]/g, '')
+          .slice(0, 64);
+      } catch {
+        parsedTicketCode = trimmed.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+      }
+    }
+
+    const normalizedQuery = trimmed.toUpperCase();
+
+    // Locate matching registration
+    let matchedReg: EventRegistration | undefined;
+
+    if (parsedEventId && parsedUserId) {
+      matchedReg = registrations.find(
+        (r) => r.eventId === parsedEventId && r.userId === parsedUserId
+      );
+    }
+
+    if (!matchedReg && parsedTicketCode) {
+      matchedReg = registrations.find((r) => {
+        const expectedCode = (r.ticketCode || buildAttendeeTicketCode(r.eventId, r.userId)).toUpperCase();
+        return expectedCode === parsedTicketCode.toUpperCase();
+      });
+    }
+
+    if (!matchedReg) {
+      // Match directly by ticketCode, registerNumber, or email
+      const candidatePool =
+        expectedEventId && expectedEventId !== 'all'
+          ? registrations.filter((r) => r.eventId === expectedEventId)
+          : registrations;
+
+      matchedReg = candidatePool.find((r) => {
+        const code = (r.ticketCode || buildAttendeeTicketCode(r.eventId, r.userId)).toUpperCase();
+        return (
+          code === normalizedQuery ||
+          r.registerNumber.toUpperCase() === normalizedQuery ||
+          r.userEmail.toUpperCase() === normalizedQuery
+        );
+      });
+    }
+
+    if (!matchedReg) {
+      return {
+        ok: false,
+        error:
+          expectedEventId && expectedEventId !== 'all'
+            ? `No registration found for "${trimmed}" in the selected event.`
+            : `No student registration matched "${trimmed}". Verify the QR pass or select the target event.`,
+      };
+    }
+
+    if (expectedEventId && expectedEventId !== 'all' && matchedReg.eventId !== expectedEventId) {
+      const regEv = events.find((e) => e.id === matchedReg?.eventId);
+      return {
+        ok: false,
+        error: `This QR pass belongs to "${regEv?.title || matchedReg.eventId}", not the selected event.`,
+      };
+    }
+
+    const targetEvent = events.find((e) => e.id === matchedReg.eventId);
+    if (!targetEvent) {
+      return { ok: false, error: 'Event associated with this registration was not found.' };
+    }
+    const onlineTarget = isOnlineEvent(targetEvent);
+    if (onlineTarget && !isOnlineAttendanceEnabled(targetEvent)) {
+      return {
+        ok: false,
+        error:
+          'Attendance is disabled for this online event. Enable Participant Attendance on the event if you want to track attendance.',
+      };
+    }
+
+    const safeEventId = sanitizeId(matchedReg.eventId);
+    const safeUserId = sanitizeId(matchedReg.userId);
+    const checkInId = sanitizeId(`${safeEventId}_${safeUserId}`);
+    const resolvedTicketCode = onlineTarget
+      ? 'ONLINE-ATTENDANCE'
+      : (matchedReg.ticketCode || buildAttendeeTicketCode(safeEventId, safeUserId))
+          .replace(/[^a-zA-Z0-9_-]/g, '')
+          .slice(0, 64);
+
+    const path = `event_checkins/${checkInId}`;
+    try {
+      const existingSnap = await getDoc(doc(db, 'event_checkins', checkInId));
+      if (existingSnap.exists()) {
+        const x = existingSnap.data();
+        const existingCheckIn: EventCheckIn = {
+          id: existingSnap.id,
+          checkInCode: String(x.checkInCode || resolvedTicketCode),
+          eventId: String(x.eventId || safeEventId),
+          eventTitle: String(x.eventTitle || targetEvent.title),
+          userId: String(x.userId || safeUserId),
+          userName: String(x.userName || matchedReg.userName),
+          userEmail: String(x.userEmail || matchedReg.userEmail),
+          collegeEmail: x.collegeEmail ? String(x.collegeEmail) : '',
+          registerNumber: String(x.registerNumber || matchedReg.registerNumber),
+          department: String(x.department || matchedReg.department),
+          year: String(x.year || matchedReg.year),
+          phone: x.phone ? String(x.phone) : '',
+          checkedInAt: String(x.checkedInAt || ''),
+        };
+        return {
+          ok: true,
+          alreadyCheckedIn: true,
+          checkIn: existingCheckIn,
+        };
+      }
+
+      const matchedUserProfile = users.find((u) => u.id === safeUserId);
+      const nowISO = new Date().toISOString();
+      const cleanRegNo = ensureMinLen(
+        (matchedReg.registerNumber || matchedUserProfile?.regNo || 'PEC-MEMBER').replace(
+          /[^A-Za-z0-9-]/g,
+          ''
+        ),
+        'PEC-MEMBER',
+        4,
+        20
+      );
+
+      const payload = {
+        checkInCode: resolvedTicketCode.length >= 6 ? resolvedTicketCode : `PASS-${safeEventId.slice(0, 6)}`,
+        eventId: safeEventId,
+        eventTitle: ensureMinLen(targetEvent.title, 'Campus Event', 2, 140),
+        userId: safeUserId,
+        userName: ensureMinLen(matchedReg.userName, 'Paavai Student', 2, 100),
+        userEmail: clampStr(matchedReg.userEmail, 160),
+        collegeEmail: matchedUserProfile?.collegeEmail
+          ? clampStr(matchedUserProfile.collegeEmail, 160)
+          : '',
+        registerNumber: cleanRegNo,
+        department: ensureMinLen(matchedReg.department || 'CSE', 'CSE', 2, 40),
+        year: ensureMinLen(matchedReg.year || '1st Year', '1st Year', 2, 20),
+        phone: clampStr(matchedUserProfile?.phone || '', 20),
+        checkedInAt: nowISO,
+      };
+
+      const lbSnap = await getDoc(doc(db, 'leaderboard', safeUserId)).catch(() => null);
+      const prevLb = lbSnap?.exists() ? lbSnap.data() : null;
+      const prevScore = Number(prevLb?.score || 0);
+      const prevSolved = Number(prevLb?.problemsSolved ?? prevLb?.solvedCount ?? 0);
+      const prevEventsLb = Number(prevLb?.eventsAttended || 0);
+
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'event_checkins', checkInId), payload);
+      batch.set(
+        doc(db, 'leaderboard', safeUserId),
+        {
+          uid: safeUserId,
+          name: payload.userName,
+          registerNumber: payload.registerNumber,
+          department: payload.department,
+          year: payload.year,
+          score: Math.min(1000000, prevScore + 50),
+          problemsSolved: prevSolved,
+          solvedCount: prevSolved,
+          eventsAttended: Math.min(1000, prevEventsLb + 1),
+          hackerRankHandle: clampStr(
+            matchedUserProfile?.hackerRankHandle ||
+              String(prevLb?.hackerRankHandle || `@${cleanRegNo.toLowerCase()}`),
+            60
+          ),
+          updatedAt: nowISO,
+        },
+        { merge: true }
+      );
+
+      await batch.commit();
+      addToast(
+        'Attendee Checked In (+50 pts)',
+        `${payload.userName} (${payload.registerNumber}) verified for "${targetEvent.title}".`,
+        'success'
+      );
+
+      return {
+        ok: true,
+        alreadyCheckedIn: false,
+        checkIn: { id: checkInId, ...payload },
+      };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, path);
+      return {
+        ok: false,
+        error: 'Could not save gate check-in. Verify Firestore permissions and try again.',
+      };
     }
   };
 
@@ -2876,46 +4333,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addToast('Export restricted', 'Only the Campus Lead can export check-in attendance.', 'error');
       return;
     }
-    const rowsToExport = filterEventId
-      ? eventCheckIns.filter((c) => c.eventId === filterEventId)
-      : eventCheckIns;
-    const headers = [
-      'Check-In ID',
-      'QR Event Code',
-      'Event Title',
-      'Student Name',
-      'Register Number',
-      'Department',
-      'Year',
-      'Personal Email',
-      'College Email',
-      'Phone',
-      'Checked In At',
-    ];
-    const rows = rowsToExport.map((c) =>
-      [
-        c.id,
-        c.checkInCode,
-        `"${c.eventTitle.replace(/"/g, '""')}"`,
-        `"${c.userName.replace(/"/g, '""')}"`,
-        c.registerNumber,
-        c.department,
-        c.year,
-        c.userEmail,
-        c.collegeEmail || '',
-        c.phone || '',
-        c.checkedInAt,
-      ].join(',')
+    const result = buildAttendanceCsvContent({
+      events,
+      registrations,
+      checkIns: eventCheckIns,
+      filterEventId,
+      mode: 'checkins_only',
+    });
+    if (result.totalRows === 0) {
+      addToast(
+        'No check-in records found',
+        'Attendance CSV export becomes available once attendees check in.',
+        'info'
+      );
+      return;
+    }
+    downloadCsvFile(result.csv, result.filename);
+    addToast(
+      'CSV exported',
+      `Downloaded ${result.totalRows} verified attendance record${result.totalRows === 1 ? '' : 's'}.`,
+      'success'
     );
-    const csv = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `hrcc-paavai-checkins-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    addToast('CSV exported', `Downloaded ${rowsToExport.length} attendee check-in records.`, 'success');
   };
 
   // ---------------- LEADERBOARD CRUD ----------------
@@ -2989,6 +4427,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!can('canManageResources') || !firebaseUser) return;
     const id = `res_${Date.now()}`;
     const path = `resources/${id}`;
+    const safeDocUrl = sanitizeOptionalDocUrl(res.documentUrl);
     try {
       await setDoc(doc(db, 'resources', id), {
         title: ensureMinLen(res.title, 'Practice Module', 3, 140),
@@ -2999,6 +4438,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         problemCount: Math.min(2000, Math.max(1, Number(res.problemCount) || 20)),
         summary: ensureMinLen(res.summary, 'Curated HackerRank problem set.', 5, 600),
         url: ensureMinLen(res.url, 'https://www.hackerrank.com', 8, 500),
+        ...(safeDocUrl ? { documentUrl: safeDocUrl } : {}),
         topics: (res.topics.length ? res.topics : ['Problem Solving']).slice(0, 10),
       });
       addToast('Resource published', `"${res.title}" added to roadmap.`, 'success');
@@ -3032,37 +4472,66 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const sliced = next.slice(0, 200);
       const nowISO = new Date().toISOString();
-      await setDoc(doc(db, 'user_progress', firebaseUser.uid), {
+      const dsaCount = resources.filter(
+        (r) => r.track === 'DSA' && sliced.includes(r.id)
+      ).length;
+
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'user_progress', firebaseUser.uid), {
         uid: firebaseUser.uid,
         completedResourceIds: sliced,
         updatedAt: nowISO,
       });
 
-      const dsaCount = resources.filter(
-        (r) => r.track === 'DSA' && sliced.includes(r.id)
-      ).length;
-      await setDoc(doc(db, 'public_profiles', firebaseUser.uid), {
-        uid: firebaseUser.uid,
-        name: ensureMinLen(currentUser.name, 'Paavai Coder', 2, 100),
-        department: ensureMinLen(currentUser.department, 'CSE', 2, 40),
-        year: ensureMinLen(currentUser.year, '1st Year', 2, 20),
-        bio: clampStr(currentUser.bio || '', 500),
-        skills: (currentUser.skills || []).slice(0, 12),
-        hackerRankHandle: clampStr(currentUser.hackerRankHandle || '', 60),
-        hackerRankUrl: clampStr(currentUser.hackerRankUrl || '', 300),
-        githubUrl: clampStr(currentUser.githubUrl || '', 300),
-        linkedinUrl: clampStr(currentUser.linkedinUrl || '', 300),
-        completedDsaCount: dsaCount,
-        completedRoadmapCount: sliced.length,
-        updatedAt: nowISO,
-      });
+      const matched = resources.find((r) => r.id === resourceId);
+      const now = new Date();
+      const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const existingPub = publicProfiles.find((p) => p.uid === firebaseUser.uid);
+
+      const newRecent: PracticeSummary[] = !wasCompleted
+        ? [
+            {
+              title: ensureMinLen(
+                matched ? `Completed: ${matched.title}` : 'Completed roadmap module',
+                'Completed roadmap module',
+                2,
+                140
+              ),
+              platform: 'DSA Roadmap' as CodingPlatform,
+              date: localDate,
+              count: 1,
+            },
+            ...(existingPub?.recentPractices || []),
+          ].slice(0, 10)
+        : existingPub?.recentPractices || [];
+
+      batch.set(
+        doc(db, 'public_profiles', firebaseUser.uid),
+        {
+          uid: firebaseUser.uid,
+          name: ensureMinLen(currentUser.name, 'Paavai Coder', 2, 100),
+          department: ensureMinLen(currentUser.department, 'CSE', 2, 40),
+          year: ensureMinLen(currentUser.year, '1st Year', 2, 20),
+          bio: clampStr(currentUser.bio || '', 500),
+          photoUrl: sanitizeImageUrl(currentUser.photoUrl),
+          skills: (currentUser.skills || []).slice(0, 12),
+          hackerRankHandle: clampStr(currentUser.hackerRankHandle || '', 60),
+          hackerRankUrl: clampStr(currentUser.hackerRankUrl || '', 300),
+          githubUrl: clampStr(currentUser.githubUrl || '', 300),
+          linkedinUrl: clampStr(currentUser.linkedinUrl || '', 300),
+          completedDsaCount: dsaCount,
+          completedRoadmapCount: sliced.length,
+          streak: computeCodingStreak(codingActivities, !wasCompleted ? localDate : undefined),
+          ...(!wasCompleted ? { lastPracticeAt: nowISO } : {}),
+          recentPractices: newRecent,
+          updatedAt: nowISO,
+        },
+        { merge: true }
+      );
 
       if (!wasCompleted) {
-        const matched = resources.find((r) => r.id === resourceId);
-        const now = new Date();
-        const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         const actId = sanitizeId(`act_rm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`);
-        await setDoc(doc(db, 'coding_activities', actId), {
+        batch.set(doc(db, 'coding_activities', actId), {
           userId: sanitizeId(firebaseUser.uid),
           platform: 'DSA Roadmap',
           date: localDate,
@@ -3074,7 +4543,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             140
           ),
           createdAt: nowISO,
-        }).catch(() => {});
+        });
+
+        const lbSnap = await getDoc(doc(db, 'leaderboard', firebaseUser.uid)).catch(() => null);
+        const prevLb = lbSnap?.exists() ? lbSnap.data() : null;
+        const prevScore = Number(prevLb?.score || 0);
+        const prevSolved = Number(prevLb?.problemsSolved ?? prevLb?.solvedCount ?? 0);
+
+        batch.set(
+          doc(db, 'leaderboard', firebaseUser.uid),
+          {
+            uid: sanitizeId(firebaseUser.uid),
+            name: ensureMinLen(currentUser.name, 'Paavai Coder', 2, 100),
+            registerNumber: ensureMinLen(
+              (currentUser.regNo || 'PEC-MEMBER').replace(/[^A-Za-z0-9-]/g, ''),
+              'PEC-MEMBER',
+              4,
+              20
+            ),
+            department: ensureMinLen(currentUser.department || 'CSE', 'CSE', 2, 40),
+            year: ensureMinLen(currentUser.year || '1st Year', '1st Year', 2, 20),
+            score: Math.min(1000000, prevScore + 10),
+            problemsSolved: prevSolved,
+            solvedCount: prevSolved,
+            hackerRankHandle: clampStr(currentUser.hackerRankHandle || '@coder_pec', 60),
+            updatedAt: nowISO,
+          },
+          { merge: true }
+        );
+      }
+
+      await batch.commit();
+      if (!wasCompleted) {
+        addToast('Module completed (+10 pts)', 'Leaderboard & public profile updated.', 'success');
       }
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
@@ -3102,27 +4603,320 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (cleanedTitle.length < 2) {
       return { ok: false, error: 'Enter an activity title (at least 2 characters).' };
     }
+    const safeNotesUrl = sanitizeOptionalDocUrl(payload.notesUrl);
+    if (payload.notesUrl && payload.notesUrl.trim() && !safeNotesUrl) {
+      return {
+        ok: false,
+        error: 'Solution/notes link must be a valid Google Drive or https:// URL.',
+      };
+    }
 
     const actId = sanitizeId(`act_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
     const path = `coding_activities/${actId}`;
+    const nowISO = new Date().toISOString();
+
     try {
-      await setDoc(doc(db, 'coding_activities', actId), {
+      const [lbSnap, pubSnap] = await Promise.all([
+        getDoc(doc(db, 'leaderboard', firebaseUser.uid)).catch(() => null),
+        getDoc(doc(db, 'public_profiles', firebaseUser.uid)).catch(() => null),
+      ]);
+      const prevLb = lbSnap?.exists() ? lbSnap.data() : null;
+      const prevPub = pubSnap?.exists() ? pubSnap.data() : null;
+
+      const cappedDeltaProblems = Math.min(20, numericCount);
+      const pointsDelta = cappedDeltaProblems * 10;
+
+      const prevScore = Number(prevLb?.score || 0);
+      const prevSolved = Number(prevLb?.problemsSolved ?? prevLb?.solvedCount ?? 0);
+      const prevHrSolved = Number(prevPub?.hackerRankSolvedCount || prevSolved || 0);
+      const nextSolved = Math.min(50000, prevSolved + cappedDeltaProblems);
+      const nextHrSolved =
+        safePlatform === 'HackerRank'
+          ? Math.min(50000, prevHrSolved + cappedDeltaProblems)
+          : prevHrSolved;
+
+      const prevRecentRaw = Array.isArray(prevPub?.recentPractices)
+        ? (prevPub.recentPractices as PracticeSummary[])
+        : [];
+      const nextRecent: PracticeSummary[] = [
+        {
+          title: cleanedTitle,
+          platform: safePlatform,
+          date: trimmedDate,
+          count: numericCount,
+          ...(safeNotesUrl ? { notesUrl: safeNotesUrl } : {}),
+        },
+        ...prevRecentRaw,
+      ].slice(0, 10);
+
+      const dsaCount = resources.filter(
+        (r) => r.track === 'DSA' && completedResourceIds.includes(r.id)
+      ).length;
+
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'coding_activities', actId), {
         userId: sanitizeId(firebaseUser.uid),
         platform: safePlatform,
         date: trimmedDate,
         count: numericCount,
         title: cleanedTitle,
-        createdAt: new Date().toISOString(),
+        ...(safeNotesUrl ? { notesUrl: safeNotesUrl } : {}),
+        createdAt: nowISO,
       });
+
+      batch.set(
+        doc(db, 'public_profiles', firebaseUser.uid),
+        {
+          uid: sanitizeId(firebaseUser.uid),
+          name: ensureMinLen(currentUser.name, 'Paavai Coder', 2, 100),
+          department: ensureMinLen(currentUser.department || 'CSE', 'CSE', 2, 40),
+          year: ensureMinLen(currentUser.year || '1st Year', '1st Year', 2, 20),
+          bio: clampStr(currentUser.bio || '', 500),
+          photoUrl: sanitizeImageUrl(currentUser.photoUrl),
+          skills: (currentUser.skills || []).slice(0, 12),
+          hackerRankHandle: clampStr(currentUser.hackerRankHandle || '', 60),
+          hackerRankUrl: clampStr(currentUser.hackerRankUrl || '', 300),
+          githubUrl: clampStr(currentUser.githubUrl || '', 300),
+          linkedinUrl: clampStr(currentUser.linkedinUrl || '', 300),
+          completedDsaCount: dsaCount,
+          completedRoadmapCount: completedResourceIds.length,
+          hackerRankSolvedCount: nextHrSolved,
+          streak: computeCodingStreak(codingActivities, trimmedDate),
+          lastPracticeAt: nowISO,
+          recentPractices: nextRecent,
+          updatedAt: nowISO,
+        },
+        { merge: true }
+      );
+
+      batch.set(
+        doc(db, 'leaderboard', firebaseUser.uid),
+        {
+          uid: sanitizeId(firebaseUser.uid),
+          name: ensureMinLen(currentUser.name, 'Paavai Coder', 2, 100),
+          registerNumber: ensureMinLen(
+            (currentUser.regNo || 'PEC-MEMBER').replace(/[^A-Za-z0-9-]/g, ''),
+            'PEC-MEMBER',
+            4,
+            20
+          ),
+          department: ensureMinLen(currentUser.department || 'CSE', 'CSE', 2, 40),
+          year: ensureMinLen(currentUser.year || '1st Year', '1st Year', 2, 20),
+          score: Math.min(1000000, prevScore + pointsDelta),
+          problemsSolved: nextSolved,
+          solvedCount: nextSolved,
+          hackerRankHandle: clampStr(currentUser.hackerRankHandle || '@coder_pec', 60),
+          updatedAt: nowISO,
+        },
+        { merge: true }
+      );
+
+      await batch.commit();
       addToast(
-        'Activity logged',
-        `${numericCount} ${safePlatform} completion${numericCount === 1 ? '' : 's'} recorded for ${trimmedDate}.`,
+        `Activity logged (+${pointsDelta} pts)`,
+        `${numericCount} ${safePlatform} completion${numericCount === 1 ? '' : 's'} synced to your profile & leaderboard.`,
         'success'
       );
       return { ok: true };
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, path);
       return { ok: false, error: 'Could not save coding activity to Firestore.' };
+    }
+  };
+
+  const syncHackerRankPractice: AppContextValue['syncHackerRankPractice'] = async (
+    manualSolvedTotal
+  ) => {
+    if (!currentUser || !firebaseUser || !isVerifiedAllowedUser) {
+      return { ok: false, error: 'Sign in with a verified student account to sync HackerRank practice.' };
+    }
+
+    const cleanHandle = (currentUser.hackerRankHandle || '').trim().replace(/^@+/, '');
+    if (!cleanHandle) {
+      return {
+        ok: false,
+        error: 'Set your HackerRank handle in your profile before syncing.',
+      };
+    }
+
+    let resolvedTotal: number | null =
+      typeof manualSolvedTotal === 'number' && Number.isFinite(manualSolvedTotal)
+        ? Math.max(0, Math.floor(manualSolvedTotal))
+        : null;
+    let source: 'hackerrank_api' | 'manual_sync' = 'manual_sync';
+    let corsBlocked = false;
+
+    if (resolvedTotal === null) {
+      try {
+        const res = await fetch(
+          `https://www.hackerrank.com/rest/hackers/${encodeURIComponent(cleanHandle)}/badges`,
+          { mode: 'cors' }
+        );
+        if (res.ok) {
+          const json = (await res.json()) as {
+            models?: Array<{ solved?: number }>;
+          };
+          if (Array.isArray(json.models)) {
+            resolvedTotal = json.models.reduce(
+              (acc, badge) => acc + Math.max(0, Number(badge.solved || 0)),
+              0
+            );
+            source = 'hackerrank_api';
+          }
+        }
+      } catch {
+        corsBlocked = true;
+      }
+    }
+
+    const [lbSnap, pubSnap] = await Promise.all([
+      getDoc(doc(db, 'leaderboard', firebaseUser.uid)).catch(() => null),
+      getDoc(doc(db, 'public_profiles', firebaseUser.uid)).catch(() => null),
+    ]);
+    const prevLb = lbSnap?.exists() ? lbSnap.data() : null;
+    const prevPub = pubSnap?.exists() ? pubSnap.data() : null;
+
+    const prevSolved = Number(prevLb?.problemsSolved ?? prevLb?.solvedCount ?? 0);
+    const prevHrSolved = Number(prevPub?.hackerRankSolvedCount ?? prevSolved);
+    const prevScore = Number(prevLb?.score || 0);
+
+    // If browser CORS prevented live HackerRank fetch and no manual total was supplied,
+    // sync existing logged HackerRank activities into public_profiles & leaderboard cleanly.
+    const loggedHrSum = codingActivities
+      .filter((a) => a.platform === 'HackerRank')
+      .reduce((sum, a) => sum + Math.max(0, a.count), 0);
+
+    const targetTotal =
+      resolvedTotal !== null
+        ? Math.max(prevHrSolved, resolvedTotal)
+        : Math.max(prevHrSolved, loggedHrSum);
+
+    const rawDelta = Math.max(0, targetTotal - prevSolved);
+    const cappedDelta = Math.min(20, rawDelta);
+    const pointsDelta = cappedDelta * 10;
+    const nextSolved = prevSolved + cappedDelta;
+    const nowISO = new Date().toISOString();
+    const now = new Date();
+    const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    const dsaCount = resources.filter(
+      (r) => r.track === 'DSA' && completedResourceIds.includes(r.id)
+    ).length;
+
+    const prevRecentRaw = Array.isArray(prevPub?.recentPractices)
+      ? (prevPub.recentPractices as PracticeSummary[])
+      : [];
+    const nextRecent: PracticeSummary[] =
+      cappedDelta > 0
+        ? [
+            {
+              title: `HackerRank Sync (@${cleanHandle})`,
+              platform: 'HackerRank' as CodingPlatform,
+              date: localDate,
+              count: cappedDelta,
+            },
+            ...prevRecentRaw,
+          ].slice(0, 10)
+        : prevRecentRaw;
+
+    try {
+      const batch = writeBatch(db);
+      if (cappedDelta > 0) {
+        const actId = sanitizeId(`act_hr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`);
+        batch.set(doc(db, 'coding_activities', actId), {
+          userId: sanitizeId(firebaseUser.uid),
+          platform: 'HackerRank',
+          date: localDate,
+          count: cappedDelta,
+          title: clampStr(`HackerRank Sync (@${cleanHandle})`, 140),
+          createdAt: nowISO,
+        });
+      }
+
+      batch.set(
+        doc(db, 'public_profiles', firebaseUser.uid),
+        {
+          uid: sanitizeId(firebaseUser.uid),
+          name: ensureMinLen(currentUser.name, 'Paavai Coder', 2, 100),
+          department: ensureMinLen(currentUser.department || 'CSE', 'CSE', 2, 40),
+          year: ensureMinLen(currentUser.year || '1st Year', '1st Year', 2, 20),
+          bio: clampStr(currentUser.bio || '', 500),
+          photoUrl: sanitizeImageUrl(currentUser.photoUrl),
+          skills: (currentUser.skills || []).slice(0, 12),
+          hackerRankHandle: `@${cleanHandle}`,
+          hackerRankUrl: clampStr(
+            currentUser.hackerRankUrl || `https://www.hackerrank.com/profile/${cleanHandle}`,
+            300
+          ),
+          githubUrl: clampStr(currentUser.githubUrl || '', 300),
+          linkedinUrl: clampStr(currentUser.linkedinUrl || '', 300),
+          completedDsaCount: dsaCount,
+          completedRoadmapCount: completedResourceIds.length,
+          hackerRankSolvedCount: Math.max(prevHrSolved, nextSolved),
+          streak: computeCodingStreak(codingActivities, cappedDelta > 0 ? localDate : undefined),
+          lastPracticeAt: nowISO,
+          recentPractices: nextRecent,
+          updatedAt: nowISO,
+        },
+        { merge: true }
+      );
+
+      batch.set(
+        doc(db, 'leaderboard', firebaseUser.uid),
+        {
+          uid: sanitizeId(firebaseUser.uid),
+          name: ensureMinLen(currentUser.name, 'Paavai Coder', 2, 100),
+          registerNumber: ensureMinLen(
+            (currentUser.regNo || 'PEC-MEMBER').replace(/[^A-Za-z0-9-]/g, ''),
+            'PEC-MEMBER',
+            4,
+            20
+          ),
+          department: ensureMinLen(currentUser.department || 'CSE', 'CSE', 2, 40),
+          year: ensureMinLen(currentUser.year || '1st Year', '1st Year', 2, 20),
+          score: Math.min(1000000, prevScore + pointsDelta),
+          problemsSolved: nextSolved,
+          solvedCount: nextSolved,
+          hackerRankHandle: `@${cleanHandle}`,
+          updatedAt: nowISO,
+        },
+        { merge: true }
+      );
+
+      await batch.commit();
+
+      if (cappedDelta > 0) {
+        addToast(
+          `HackerRank synced (+${pointsDelta} pts)`,
+          `Added ${cappedDelta} new solved problem${cappedDelta === 1 ? '' : 's'} for @${cleanHandle}. Leaderboard updated immediately.`,
+          'success'
+        );
+      } else if (corsBlocked && manualSolvedTotal === undefined) {
+        addToast(
+          'Profile aligned with local logs',
+          'Browser CORS blocks direct HackerRank API reads. Nightly GitHub sync updates @' +
+            cleanHandle +
+            ' automatically, or enter your solved count to sync immediately.',
+          'info'
+        );
+      } else {
+        addToast(
+          'HackerRank profile up to date',
+          `@${cleanHandle} is synced (${nextSolved} solved problems).`,
+          'info'
+        );
+      }
+
+      return {
+        ok: true,
+        delta: cappedDelta,
+        totalSolved: nextSolved,
+        source,
+        corsBlocked,
+      };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `leaderboard/${firebaseUser.uid}`);
+      return { ok: false, error: 'Failed to sync HackerRank practice to Firestore.' };
     }
   };
 
@@ -3317,28 +5111,278 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const path = `join_requests/${id}`;
     try {
       await setDoc(doc(db, 'join_requests', id), docPayload);
+      try {
+        localStorage.setItem(PENDING_JOIN_REQ_KEY, id);
+      } catch {
+        // Ignore storage errors
+      }
       addToast(
         'Application submitted',
-        'Saved to Firestore. The Campus Lead will review your inquiry.',
+        'Saved to Firestore. Complete your verified signup to activate immediately.',
         'success'
       );
+      return { ok: true, id };
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, path);
+      return { ok: false };
     }
   };
 
-  const reviewJoinRequest = async (requestId: string, decision: 'approved' | 'rejected') => {
+  const dispatchJoinRequestNotificationEmail = async (
+    reqDoc: JoinRequest,
+    decision: 'approved' | 'rejected',
+    options?: { reviewNote?: string; leadPhoneOverride?: string }
+  ): Promise<{
+    emailStatus: 'sent' | 'queued' | 'failed';
+    emailMessage?: string;
+    emailSentAt?: string;
+  }> => {
+    if (!firebaseUser) {
+      return { emailStatus: 'failed', emailMessage: 'Sign in required.' };
+    }
+
+    const leadUser =
+      users.find((u) => u.role === 'lead') ||
+      (currentUser?.role === 'lead' ? currentUser : null);
+    const resolvedLeadName =
+      (siteSettings.leadName || '').trim() || leadUser?.name || currentUser?.name || 'Campus Lead';
+    const resolvedLeadPhone =
+      (options?.leadPhoneOverride ?? '').trim() ||
+      (siteSettings.leadPhone || '').trim() ||
+      (leadUser?.phone || '').trim() ||
+      (currentUser?.phone || '').trim();
+    const resolvedLeadEmail =
+      (siteSettings.contactEmail || '').trim() ||
+      leadUser?.email ||
+      CAMPUS_LEAD_EMAIL;
+    const cleanedNote = clampStr((options?.reviewNote ?? reqDoc.reviewNote ?? '').trim(), 400);
+    const logType: EmailSendAttempt['type'] =
+      decision === 'approved' ? 'join_request_approved' : 'join_request_rejected';
+
+    try {
+      const idToken = await firebaseUser.getIdToken();
+      const response = await fetch('/api/join-requests/notify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          requestId: reqDoc.id,
+          applicantName: reqDoc.name,
+          applicantEmail: reqDoc.email,
+          registerNumber: reqDoc.registerNumber,
+          department: reqDoc.department,
+          year: reqDoc.year,
+          decision,
+          reviewNote: cleanedNote,
+          leadName: resolvedLeadName,
+          leadPhone: resolvedLeadPhone,
+          leadEmail: resolvedLeadEmail,
+          chapterName: siteSettings.chapterName,
+          collegeName: siteSettings.collegeName,
+          portalUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+        }),
+      });
+
+      const contentType = response.headers.get('content-type') || '';
+      const result = contentType.includes('application/json')
+        ? ((await response.json()) as {
+            ok?: boolean;
+            delivered?: boolean;
+            provider?: string;
+            reason?: string;
+            message?: string;
+          })
+        : null;
+
+      if (response.ok && result?.delivered) {
+        const sentAt = new Date().toISOString();
+        await logEmailSendAttempt({
+          type: logType,
+          email: reqDoc.email,
+          status: 'sent',
+          errorCode: result.provider ? `provider_${result.provider}` : '',
+          errorMessage:
+            decision === 'approved'
+              ? `Approval mail sent (Lead call contact: ${resolvedLeadPhone || resolvedLeadName})`
+              : 'Rejection notification mail sent.',
+          actorUid: firebaseUser.uid,
+        });
+        return {
+          emailStatus: 'sent',
+          emailSentAt: sentAt,
+          emailMessage:
+            decision === 'approved'
+              ? `Automated acceptance email sent to ${reqDoc.email} (instructing them to call the Campus Lead).`
+              : `Automated rejection email sent to ${reqDoc.email}.`,
+        };
+      }
+
+      const isNotConfigured =
+        result?.reason === 'mail_not_configured' || !contentType.includes('application/json');
+      const fallbackStatus: 'queued' | 'failed' = isNotConfigured ? 'queued' : 'failed';
+      const errMsg = clampStr(
+        result?.message ||
+          (isNotConfigured
+            ? 'SMTP_USER / SMTP_PASS (or RESEND_API_KEY) not configured on server yet.'
+            : `Email API returned HTTP ${response.status}.`),
+        290
+      );
+
+      await logEmailSendAttempt({
+        type: logType,
+        email: reqDoc.email,
+        status: 'failed',
+        errorCode: clampStr(result?.reason || (isNotConfigured ? 'mail_not_configured' : `http_${response.status}`), 160),
+        errorMessage: errMsg,
+        actorUid: firebaseUser.uid,
+      });
+
+      return {
+        emailStatus: fallbackStatus,
+        emailMessage: errMsg,
+      };
+    } catch (err) {
+      const errMsg = clampStr(
+        err instanceof Error ? err.message : 'Network error calling mail automation endpoint.',
+        290
+      );
+      await logEmailSendAttempt({
+        type: logType,
+        email: reqDoc.email,
+        status: 'failed',
+        errorCode: 'network_error',
+        errorMessage: errMsg,
+        actorUid: firebaseUser.uid,
+      });
+      return {
+        emailStatus: 'queued',
+        emailMessage: errMsg,
+      };
+    }
+  };
+
+  const reviewJoinRequest: AppContextValue['reviewJoinRequest'] = async (
+    requestId,
+    decision,
+    options
+  ) => {
+    if (!can('canManageUsers') || !firebaseUser) {
+      return { ok: false, emailStatus: 'failed', emailMessage: 'Campus Lead access required.' };
+    }
+    const targetReq = joinRequests.find((r) => r.id === requestId);
+    const path = `join_requests/${requestId}`;
+    const reviewedAt = new Date().toISOString();
+    const cleanedNote = clampStr((options?.reviewNote || '').trim(), 400);
+
+    try {
+      await updateDoc(doc(db, 'join_requests', requestId), {
+        status: decision,
+        reviewedAt,
+        reviewedByUid: firebaseUser.uid,
+        reviewNote: cleanedNote,
+        emailNotificationStatus: 'queued',
+        emailError: '',
+      });
+
+      if (!targetReq) {
+        addToast(
+          decision === 'approved' ? 'Join request approved' : 'Join request declined',
+          'Status updated in Firestore.',
+          decision === 'approved' ? 'success' : 'info'
+        );
+        return { ok: true, emailStatus: 'queued' };
+      }
+
+      const mailRes = await dispatchJoinRequestNotificationEmail(targetReq, decision, options);
+
+      await updateDoc(doc(db, 'join_requests', requestId), {
+        emailNotificationStatus: mailRes.emailStatus,
+        emailSentAt: mailRes.emailSentAt || '',
+        emailError: mailRes.emailStatus === 'sent' ? '' : clampStr(mailRes.emailMessage || '', 290),
+      });
+
+      if (mailRes.emailStatus === 'sent') {
+        addToast(
+          decision === 'approved' ? 'Approved & Automated Mail Sent' : 'Rejected & Automated Mail Sent',
+          mailRes.emailMessage,
+          decision === 'approved' ? 'success' : 'info'
+        );
+      } else {
+        addToast(
+          decision === 'approved' ? 'Approved (Mail Queued)' : 'Rejected (Mail Queued)',
+          mailRes.emailMessage ||
+            'Configure SMTP_USER & SMTP_PASS in Secrets for automatic delivery, or use Open Email Draft.',
+          'info'
+        );
+      }
+
+      return {
+        ok: true,
+        emailStatus: mailRes.emailStatus,
+        emailMessage: mailRes.emailMessage,
+      };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+      return { ok: false, emailStatus: 'failed', emailMessage: 'Could not update join request.' };
+    }
+  };
+
+  const resendJoinRequestEmail: AppContextValue['resendJoinRequestEmail'] = async (
+    requestId,
+    options
+  ) => {
+    if (!can('canManageUsers') || !firebaseUser) {
+      return { ok: false, emailStatus: 'failed', emailMessage: 'Campus Lead access required.' };
+    }
+    const targetReq = joinRequests.find((r) => r.id === requestId);
+    if (!targetReq || (targetReq.status !== 'approved' && targetReq.status !== 'rejected')) {
+      return {
+        ok: false,
+        emailStatus: 'failed',
+        emailMessage: 'Only approved or rejected join requests can resend decision emails.',
+      };
+    }
+
+    const path = `join_requests/${requestId}`;
+    try {
+      const mailRes = await dispatchJoinRequestNotificationEmail(
+        targetReq,
+        targetReq.status,
+        options
+      );
+      await updateDoc(doc(db, 'join_requests', requestId), {
+        emailNotificationStatus: mailRes.emailStatus,
+        emailSentAt: mailRes.emailSentAt || targetReq.emailSentAt || '',
+        emailError: mailRes.emailStatus === 'sent' ? '' : clampStr(mailRes.emailMessage || '', 290),
+      });
+
+      addToast(
+        mailRes.emailStatus === 'sent' ? 'Automated Mail Resent' : 'Mail Still Queued / Failed',
+        mailRes.emailMessage,
+        mailRes.emailStatus === 'sent' ? 'success' : 'error'
+      );
+
+      return {
+        ok: mailRes.emailStatus === 'sent',
+        emailStatus: mailRes.emailStatus,
+        emailMessage: mailRes.emailMessage,
+      };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+      return { ok: false, emailStatus: 'failed', emailMessage: 'Failed to update mail status.' };
+    }
+  };
+
+  const deleteJoinRequest: AppContextValue['deleteJoinRequest'] = async (requestId) => {
     if (!can('canManageUsers') || !firebaseUser) return;
     const path = `join_requests/${requestId}`;
     try {
-      await updateDoc(doc(db, 'join_requests', requestId), { status: decision });
-      addToast(
-        decision === 'approved' ? 'Join request marked reviewed' : 'Join request declined',
-        'Status updated in Firestore.',
-        decision === 'approved' ? 'success' : 'info'
-      );
+      await deleteDoc(doc(db, 'join_requests', requestId));
+      addToast('Join inquiry deleted', 'Removed from Firestore.', 'info');
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, path);
+      handleFirestoreError(err, OperationType.DELETE, path);
     }
   };
 
@@ -3351,7 +5395,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const x = d.data();
           return {
             id: d.id,
-            type: (x.type === 'password_reset' ? 'password_reset' : 'verification') as EmailSendAttempt['type'],
+            type: normalizeEmailAttemptType(x.type),
             email: String(x.email || ''),
             status: (x.status === 'failed' ? 'failed' : 'sent') as EmailSendAttempt['status'],
             errorCode: x.errorCode ? String(x.errorCode) : undefined,
@@ -3389,6 +5433,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         collegeName: ensureMinLen(merged.collegeName, INITIAL_SITE_SETTINGS.collegeName, 2, 120),
         tagline: ensureMinLen(merged.tagline, INITIAL_SITE_SETTINGS.tagline, 2, 120),
         contactEmail: clampStr(merged.contactEmail || INITIAL_SITE_SETTINGS.contactEmail, 160),
+        leadName: clampStr(merged.leadName || '', 100),
+        leadPhone: clampStr(merged.leadPhone || '', 25),
         campusLocation: ensureMinLen(
           merged.campusLocation,
           INITIAL_SITE_SETTINGS.campusLocation,
@@ -3457,6 +5503,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updates.photoUrl !== undefined
         ? sanitizeImageUrl(updates.photoUrl)
         : sanitizeImageUrl(currentUser.photoUrl);
+    if (
+      updates.documentUrl !== undefined &&
+      updates.documentUrl.trim() &&
+      !sanitizeOptionalDocUrl(updates.documentUrl)
+    ) {
+      addToast(
+        'Invalid document URL',
+        'Portfolio/document URL must be a valid Google Drive or https:// link.',
+        'error'
+      );
+      return;
+    }
+    const nextDocumentUrl =
+      updates.documentUrl !== undefined
+        ? sanitizeOptionalDocUrl(updates.documentUrl)
+        : sanitizeOptionalDocUrl(currentUser.documentUrl);
     const nextBio =
       updates.bio !== undefined ? clampStr(updates.bio, 500) : currentUser.bio;
     const nextSkills =
@@ -3528,6 +5590,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...(updates.year !== undefined ? { year: nextYear } : {}),
         ...(updates.phone !== undefined ? { phone: nextPhoneStr } : {}),
         ...(updates.photoUrl !== undefined ? { photoUrl: nextPhotoUrl } : {}),
+        ...(updates.documentUrl !== undefined ? { documentUrl: nextDocumentUrl } : {}),
         ...(updates.hackerRankHandle !== undefined ? { hackerRankHandle: nextHandle } : {}),
         ...(updates.hackerRankUrl !== undefined ? { hackerRankUrl: nextHackerRankUrl } : {}),
         ...(updates.githubUrl !== undefined ? { githubUrl: nextGithubUrl } : {}),
@@ -3548,22 +5611,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (r) => r.track === 'DSA' && completedResourceIds.includes(r.id)
       ).length;
 
-      await setDoc(doc(db, 'public_profiles', firebaseUser.uid), {
-        uid: firebaseUser.uid,
-        name: nextName,
-        department: nextDepartment,
-        year: nextYear,
-        bio: nextBio,
-        photoUrl: nextPhotoUrl,
-        skills: nextSkills,
-        hackerRankHandle: nextHandle,
-        hackerRankUrl: nextHackerRankUrl,
-        githubUrl: nextGithubUrl,
-        linkedinUrl: nextLinkedinUrl,
-        completedDsaCount: dsaCount,
-        completedRoadmapCount: completedResourceIds.length,
-        updatedAt: nowISO,
-      });
+      await setDoc(
+        doc(db, 'public_profiles', firebaseUser.uid),
+        {
+          uid: firebaseUser.uid,
+          name: nextName,
+          department: nextDepartment,
+          year: nextYear,
+          bio: nextBio,
+          photoUrl: nextPhotoUrl,
+          documentUrl: nextDocumentUrl,
+          skills: nextSkills,
+          hackerRankHandle: nextHandle,
+          hackerRankUrl: nextHackerRankUrl,
+          githubUrl: nextGithubUrl,
+          linkedinUrl: nextLinkedinUrl,
+          completedDsaCount: dsaCount,
+          completedRoadmapCount: completedResourceIds.length,
+          updatedAt: nowISO,
+        },
+        { merge: true }
+      );
 
       if (currentUser.role === 'lead' || currentUser.role === 'crew') {
         await setDoc(
@@ -3586,6 +5654,456 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       handleFirestoreError(err, OperationType.UPDATE, path);
     }
   };
+
+  // ---------------- UNSTOP CSV PARTICIPANT IMPORT ACTIONS ----------------
+  const importUnstopParticipants: AppContextValue['importUnstopParticipants'] = async (
+    eventId,
+    rows
+  ) => {
+    if (!currentUser || !can('canAccessCrewDashboard')) {
+      return { ok: false, error: 'Only Campus Crew and Campus Lead can import Unstop CSVs.' };
+    }
+    const targetEvent = events.find((e) => e.id === eventId);
+    if (!targetEvent) {
+      return { ok: false, error: 'Selected event was not found.' };
+    }
+    if (rows.length === 0) {
+      return { ok: false, error: 'No valid participant rows to import.' };
+    }
+
+    const nowIso = new Date().toISOString();
+    const importerName = ensureMinLen(currentUser.name, 'Campus Organizer', 2, 100);
+    const eventTitle = ensureMinLen(targetEvent.title, 'Campus Event', 2, 140);
+
+    try {
+      // Write in Firestore batches of 400 (limit is 500 per batch)
+      for (let i = 0; i < rows.length; i += 400) {
+        const chunk = rows.slice(i, i + 400);
+        const batch = writeBatch(db);
+        for (const row of chunk) {
+          const docId = sanitizeId(buildUnstopParticipantDocId(targetEvent.id, row.email));
+          const payload: Record<string, string> = {
+            eventId: targetEvent.id,
+            eventTitle,
+            name: clampStr(row.name || 'Participant', 100),
+            email: clampStr(row.email.trim().toLowerCase(), 120),
+            importedAt: nowIso,
+            importedByUid: currentUser.id,
+            importedByName: importerName,
+          };
+          if (row.registerNumber) payload.registerNumber = clampStr(row.registerNumber, 32);
+          if (row.college) payload.college = clampStr(row.college, 160);
+          if (row.teamName) payload.teamName = clampStr(row.teamName, 100);
+          if (row.status) payload.status = clampStr(row.status, 60);
+          if (row.phone) payload.phone = clampStr(row.phone, 20);
+          if (row.matchedUserId) payload.matchedUserId = clampStr(row.matchedUserId, 128);
+
+          batch.set(doc(db, 'unstop_participants', docId), payload);
+        }
+        await batch.commit();
+      }
+
+      addToast(
+        'Unstop CSV Imported',
+        `Saved ${rows.length} participant${rows.length === 1 ? '' : 's'} for "${targetEvent.title}".`,
+        'success'
+      );
+      return { ok: true, importedCount: rows.length };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'unstop_participants');
+      return { ok: false, error: 'Could not save imported participants to Firestore.' };
+    }
+  };
+
+  const deleteUnstopParticipant: AppContextValue['deleteUnstopParticipant'] = async (id) => {
+    if (!can('canApproveContent')) {
+      addToast('Permission Denied', 'Only the Campus Lead can remove imported records.', 'error');
+      return;
+    }
+    const cleanId = sanitizeId(id);
+    try {
+      await deleteDoc(doc(db, 'unstop_participants', cleanId));
+      addToast('Participant Removed', 'Unstop participant record deleted.', 'info');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `unstop_participants/${cleanId}`);
+    }
+  };
+
+  const clearEventUnstopParticipants: AppContextValue['clearEventUnstopParticipants'] = async (
+    eventId
+  ) => {
+    if (!can('canApproveContent')) {
+      addToast('Permission Denied', 'Only the Campus Lead can clear imported rosters.', 'error');
+      return;
+    }
+    const targets = unstopParticipants.filter((p) => p.eventId === eventId);
+    if (targets.length === 0) return;
+
+    try {
+      for (let i = 0; i < targets.length; i += 400) {
+        const chunk = targets.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach((p) => batch.delete(doc(db, 'unstop_participants', p.id)));
+        await batch.commit();
+      }
+      addToast(
+        'Unstop Roster Cleared',
+        `Removed ${targets.length} imported record${targets.length === 1 ? '' : 's'}.`,
+        'info'
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'unstop_participants');
+    }
+  };
+
+  // ---------------- VERIFIABLE E-CERTIFICATE ACTIONS ----------------
+  const claimParticipationCertificate: AppContextValue['claimParticipationCertificate'] = async (
+    eventId
+  ) => {
+    if (!currentUser || !firebaseUser) {
+      return { ok: false, error: 'Sign in with a verified student account to claim certificates.' };
+    }
+    const targetEvent = events.find((e) => e.id === eventId);
+    if (!targetEvent) {
+      return { ok: false, error: 'Event details were not found.' };
+    }
+
+    const checkInRecord = eventCheckIns.find(
+      (c) => c.eventId === eventId && c.userId === currentUser.id
+    );
+    if (!checkInRecord) {
+      return {
+        ok: false,
+        error: 'Verified QR event check-in is required before claiming a Participation E-Certificate.',
+      };
+    }
+
+    const certId = `CERT-${eventId}-${currentUser.id}`;
+    const path = `certificates/${certId}`;
+
+    try {
+      const existingSnap = await getDoc(doc(db, 'certificates', certId));
+      if (existingSnap.exists()) {
+        const x = existingSnap.data();
+        const existingCert: EventCertificate = {
+          id: existingSnap.id,
+          certId: String(x.certId || existingSnap.id),
+          eventId: String(x.eventId || eventId),
+          eventTitle: String(x.eventTitle || targetEvent.title),
+          eventDate: String(x.eventDate || targetEvent.dateISO),
+          recipientUid: x.recipientUid ? String(x.recipientUid) : undefined,
+          recipientName: String(x.recipientName || currentUser.name),
+          registerNumber: x.registerNumber ? String(x.registerNumber) : undefined,
+          department: x.department ? String(x.department) : undefined,
+          awardType: (x.awardType as CertificateAwardType) || 'Participation',
+          awardTitle: x.awardTitle ? String(x.awardTitle) : undefined,
+          issuedAt: String(x.issuedAt || new Date().toISOString()),
+          issuedByUid: String(x.issuedByUid || currentUser.id),
+          issuedByName: String(x.issuedByName || siteSettings.leadName || 'Campus Lead'),
+        };
+        return { ok: true, certificate: existingCert, alreadyIssued: true };
+      }
+
+      const nowIso = new Date().toISOString();
+      const payload: Record<string, string> = {
+        certId,
+        eventId: targetEvent.id,
+        eventTitle: ensureMinLen(targetEvent.title, 'Campus Event', 2, 140),
+        eventDate: ensureMinLen(targetEvent.dateISO, nowIso.slice(0, 10), 4, 40),
+        recipientUid: currentUser.id,
+        recipientName: ensureMinLen(currentUser.name, 'Student Member', 2, 100),
+        awardType: 'Participation',
+        awardTitle: 'for active participation and verified QR attendance in',
+        issuedAt: nowIso,
+        issuedByUid: currentUser.id,
+        issuedByName: ensureMinLen(
+          siteSettings.leadName || 'HRCC Paavai Campus Lead',
+          'Campus Lead',
+          2,
+          100
+        ),
+      };
+      if (currentUser.regNo) {
+        payload.registerNumber = clampStr(currentUser.regNo, 32);
+      }
+      if (currentUser.department) {
+        payload.department = clampStr(currentUser.department, 60);
+      }
+
+      await setDoc(doc(db, 'certificates', certId), payload);
+
+      const created: EventCertificate = {
+        id: certId,
+        certId,
+        eventId: payload.eventId,
+        eventTitle: payload.eventTitle,
+        eventDate: payload.eventDate,
+        recipientUid: payload.recipientUid,
+        recipientName: payload.recipientName,
+        registerNumber: payload.registerNumber,
+        department: payload.department,
+        awardType: 'Participation',
+        awardTitle: payload.awardTitle,
+        issuedAt: payload.issuedAt,
+        issuedByUid: payload.issuedByUid,
+        issuedByName: payload.issuedByName,
+      };
+
+      addToast(
+        'E-Certificate Issued',
+        `Participation certificate ${certId} is ready to download and verify.`,
+        'success'
+      );
+      return { ok: true, certificate: created, alreadyIssued: false };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, path);
+      return {
+        ok: false,
+        error: 'Could not issue E-Certificate. Ensure your QR check-in is verified.',
+      };
+    }
+  };
+
+  const issueEventCertificate: AppContextValue['issueEventCertificate'] = async (payload) => {
+    if (!currentUser || !can('canAccessCrewDashboard')) {
+      return { ok: false, error: 'Only Campus Crew and Campus Lead can issue certificates.' };
+    }
+    const targetEvent = events.find((e) => e.id === payload.eventId);
+    if (!targetEvent) {
+      return { ok: false, error: 'Selected event was not found.' };
+    }
+    const cleanName = payload.recipientName.trim();
+    if (cleanName.length < 2) {
+      return { ok: false, error: 'Recipient name must be at least 2 characters.' };
+    }
+
+    const shortEvent = targetEvent.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase() || 'EVT';
+    const randSuffix = Math.random().toString(36).slice(2, 8).toUpperCase();
+    const certId =
+      payload.awardType === 'Participation' && payload.recipientUid
+        ? `CERT-${targetEvent.id}-${payload.recipientUid}`
+        : `CERT-${shortEvent}-${Date.now().toString(36).toUpperCase()}-${randSuffix}`;
+
+    try {
+      // Certificates are immutable (allow update: if false) — return cleanly if deterministic Participation cert already exists
+      if (payload.awardType === 'Participation' && payload.recipientUid) {
+        const existingSnap = await getDoc(doc(db, 'certificates', certId));
+        if (existingSnap.exists()) {
+          const x = existingSnap.data();
+          const existingCert: EventCertificate = {
+            id: existingSnap.id,
+            certId: String(x.certId || existingSnap.id),
+            eventId: String(x.eventId || targetEvent.id),
+            eventTitle: String(x.eventTitle || targetEvent.title),
+            eventDate: String(x.eventDate || targetEvent.dateISO),
+            recipientUid: x.recipientUid ? String(x.recipientUid) : undefined,
+            recipientName: String(x.recipientName || cleanName),
+            registerNumber: x.registerNumber ? String(x.registerNumber) : undefined,
+            department: x.department ? String(x.department) : undefined,
+            awardType: (x.awardType as CertificateAwardType) || 'Participation',
+            awardTitle: x.awardTitle ? String(x.awardTitle) : undefined,
+            issuedAt: String(x.issuedAt || new Date().toISOString()),
+            issuedByUid: String(x.issuedByUid || currentUser.id),
+            issuedByName: String(x.issuedByName || siteSettings.leadName || currentUser.name),
+          };
+          addToast(
+            'Certificate Already Issued',
+            `${existingCert.recipientName} already has Participation certificate ${certId}.`,
+            'info'
+          );
+          return { ok: true, certificate: existingCert };
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      const docData: Record<string, string> = {
+        certId,
+        eventId: targetEvent.id,
+        eventTitle: ensureMinLen(targetEvent.title, 'Campus Event', 2, 140),
+        eventDate: ensureMinLen(targetEvent.dateISO, nowIso.slice(0, 10), 4, 40),
+        recipientName: ensureMinLen(cleanName, 'Student Member', 2, 100),
+        awardType: payload.awardType,
+        issuedAt: nowIso,
+        issuedByUid: currentUser.id,
+        issuedByName: ensureMinLen(
+          siteSettings.leadName || currentUser.name,
+          'Campus Lead',
+          2,
+          100
+        ),
+      };
+      if (payload.recipientUid) docData.recipientUid = clampStr(payload.recipientUid, 128);
+      if (payload.registerNumber?.trim()) {
+        docData.registerNumber = clampStr(payload.registerNumber.trim().toUpperCase(), 32);
+      }
+      if (payload.department?.trim()) {
+        docData.department = clampStr(payload.department.trim(), 60);
+      }
+      if (payload.awardTitle?.trim()) {
+        docData.awardTitle = clampStr(payload.awardTitle.trim(), 140);
+      }
+
+      await setDoc(doc(db, 'certificates', certId), docData);
+      const created: EventCertificate = {
+        id: certId,
+        certId,
+        eventId: docData.eventId,
+        eventTitle: docData.eventTitle,
+        eventDate: docData.eventDate,
+        recipientUid: docData.recipientUid,
+        recipientName: docData.recipientName,
+        registerNumber: docData.registerNumber,
+        department: docData.department,
+        awardType: payload.awardType,
+        awardTitle: docData.awardTitle,
+        issuedAt: docData.issuedAt,
+        issuedByUid: docData.issuedByUid,
+        issuedByName: docData.issuedByName,
+      };
+      addToast(
+        'Certificate Issued',
+        `${payload.awardType} certificate issued to ${created.recipientName} (${certId}).`,
+        'success'
+      );
+      return { ok: true, certificate: created };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `certificates/${certId}`);
+      return { ok: false, error: 'Could not issue certificate in Firestore.' };
+    }
+  };
+
+  const issueCertificatesForEventCheckIns: AppContextValue['issueCertificatesForEventCheckIns'] =
+    async (eventId) => {
+      if (!currentUser || !can('canAccessCrewDashboard')) {
+        return { ok: false, error: 'Only Campus Crew and Campus Lead can bulk-issue certificates.' };
+      }
+      const targetEvent = events.find((e) => e.id === eventId);
+      if (!targetEvent) {
+        return { ok: false, error: 'Selected event was not found.' };
+      }
+
+      const attendees = eventCheckIns.filter((c) => c.eventId === eventId);
+      if (attendees.length === 0) {
+        return { ok: false, error: 'No verified QR check-ins found for this event yet.' };
+      }
+
+      const existingIds = new Set(certificates.map((c) => c.certId));
+      const pending = attendees.filter(
+        (a) => !existingIds.has(`CERT-${targetEvent.id}-${a.userId}`)
+      );
+
+      if (pending.length === 0) {
+        addToast(
+          'All Attendees Already Certified',
+          `All ${attendees.length} QR checked-in attendees already have Participation certificates.`,
+          'info'
+        );
+        return { ok: true, issuedCount: 0, skippedCount: attendees.length };
+      }
+
+      const nowIso = new Date().toISOString();
+      const issuerName = ensureMinLen(
+        siteSettings.leadName || currentUser.name,
+        'Campus Lead',
+        2,
+        100
+      );
+      const eventTitle = ensureMinLen(targetEvent.title, 'Campus Event', 2, 140);
+      const eventDate = ensureMinLen(targetEvent.dateISO, nowIso.slice(0, 10), 4, 40);
+
+      try {
+        for (let i = 0; i < pending.length; i += 400) {
+          const chunk = pending.slice(i, i + 400);
+          const batch = writeBatch(db);
+          for (const attendee of chunk) {
+            const certId = `CERT-${targetEvent.id}-${attendee.userId}`;
+            const docData: Record<string, string> = {
+              certId,
+              eventId: targetEvent.id,
+              eventTitle,
+              eventDate,
+              recipientUid: attendee.userId,
+              recipientName: ensureMinLen(attendee.userName, 'Student Member', 2, 100),
+              awardType: 'Participation',
+              awardTitle: 'for active participation and verified QR attendance in',
+              issuedAt: nowIso,
+              issuedByUid: currentUser.id,
+              issuedByName: issuerName,
+            };
+            if (attendee.registerNumber) {
+              docData.registerNumber = clampStr(attendee.registerNumber, 32);
+            }
+            if (attendee.department) {
+              docData.department = clampStr(attendee.department, 60);
+            }
+            batch.set(doc(db, 'certificates', certId), docData);
+          }
+          await batch.commit();
+        }
+
+        const skippedCount = attendees.length - pending.length;
+        addToast(
+          'Bulk Certificates Issued',
+          `Issued ${pending.length} Participation certificate${pending.length === 1 ? '' : 's'} for "${targetEvent.title}".`,
+          'success'
+        );
+        return { ok: true, issuedCount: pending.length, skippedCount };
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, 'certificates');
+        return { ok: false, error: 'Bulk issuance failed. Please try again.' };
+      }
+    };
+
+  const deleteCertificate: AppContextValue['deleteCertificate'] = async (certId) => {
+    if (!can('canApproveContent')) {
+      addToast('Permission Denied', 'Only the Campus Lead can revoke certificates.', 'error');
+      return;
+    }
+    const cleanId = sanitizeId(certId);
+    try {
+      await deleteDoc(doc(db, 'certificates', cleanId));
+      addToast('Certificate Revoked', `Removed certificate ${cleanId}.`, 'info');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `certificates/${cleanId}`);
+    }
+  };
+
+  const getCertificateById: AppContextValue['getCertificateById'] = useCallback(async (certId) => {
+    const cleanId = certId.trim();
+    if (!cleanId || !/^[a-zA-Z0-9_-]{4,128}$/.test(cleanId)) {
+      return { ok: false, error: 'Invalid certificate ID format.' };
+    }
+    try {
+      const snap = await getDoc(doc(db, 'certificates', cleanId));
+      if (!snap.exists()) {
+        return {
+          ok: false,
+          error: 'No verified E-Certificate matches this ID in the HRCC Paavai registry.',
+        };
+      }
+      const x = snap.data();
+      const cert: EventCertificate = {
+        id: snap.id,
+        certId: String(x.certId || snap.id),
+        eventId: String(x.eventId || ''),
+        eventTitle: String(x.eventTitle || ''),
+        eventDate: String(x.eventDate || ''),
+        recipientUid: x.recipientUid ? String(x.recipientUid) : undefined,
+        recipientName: String(x.recipientName || ''),
+        registerNumber: x.registerNumber ? String(x.registerNumber) : undefined,
+        department: x.department ? String(x.department) : undefined,
+        awardType: (x.awardType as CertificateAwardType) || 'Participation',
+        awardTitle: x.awardTitle ? String(x.awardTitle) : undefined,
+        issuedAt: String(x.issuedAt || ''),
+        issuedByUid: String(x.issuedByUid || ''),
+        issuedByName: String(x.issuedByName || ''),
+      };
+      return { ok: true, certificate: cert };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.GET, `certificates/${cleanId}`);
+      return { ok: false, error: 'Unable to verify certificate right now.' };
+    }
+  }, []);
 
   return (
     <AppContext.Provider
@@ -3620,8 +6138,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         resources,
         gallery,
         registrations,
+        unstopParticipants,
         checkInCodes,
         eventCheckIns,
+        certificates,
         joinRequests,
         completedResourceIds,
         codingActivities,
@@ -3633,19 +6153,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteEvent,
         approveEvent,
         rejectEvent,
+        toggleOnlineEventAttendance,
+        fetchUnstopEventDetails,
+        syncEventFromUnstop,
         createAnnouncement,
         deleteAnnouncement,
         approveAnnouncement,
         rejectAnnouncement,
         registerForEvent,
         cancelRegistration,
+        resendEventTicketEmail,
         exportRegistrationsCSV,
+        importUnstopParticipants,
+        deleteUnstopParticipant,
+        clearEventUnstopParticipants,
         generateEventCheckInCode,
         toggleEventCheckInCodeActive,
         deleteEventCheckInCode,
         lookupEventCheckInCode,
         checkInAttendeeWithCode,
+        markOnlineEventAttendance,
+        crewCheckInAttendeeByTicket,
         exportEventCheckInsCSV,
+        claimParticipationCertificate,
+        issueEventCertificate,
+        issueCertificatesForEventCheckIns,
+        deleteCertificate,
+        getCertificateById,
         upsertLeaderboardEntry,
         deleteLeaderboardEntry,
         addGalleryPhoto,
@@ -3654,12 +6188,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteResource,
         toggleResourceCompleted,
         logCodingActivity,
+        syncHackerRankPractice,
         deleteCodingActivity,
         updateUserRole,
         updateMemberPhotoUrl,
         deleteUser,
         submitJoinRequest,
         reviewJoinRequest,
+        resendJoinRequestEmail,
+        deleteJoinRequest,
         updateSiteSettings,
         updateOwnProfile,
         toasts,

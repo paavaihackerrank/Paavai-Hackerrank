@@ -1,26 +1,51 @@
-import React, { useState } from 'react';
+import React, { memo, useEffect, useState } from 'react';
 import { Code2 } from 'lucide-react';
+import {
+  extractDriveFileId,
+  toDriveImageUrl,
+  toDriveThumbnailUrl,
+} from '../lib/driveUtils';
 
 interface SafeImageProps {
   src: string;
   alt: string;
   className?: string;
   fallbackTitle?: string;
+  /** Set true for above-the-fold LCP hero images to load eagerly with high fetch priority */
+  priority?: boolean;
 }
 
 /**
- * Resilient image component that ensures zero broken image frames if an external
- * or user-submitted photo URL fails to load.
+ * Resilient image component that automatically normalizes Google Drive links,
+ * falls back from lh3.googleusercontent.com -> drive.google.com/thumbnail ->
+ * clean UI placeholder, enforces referrerPolicy="no-referrer", and lazy-loads
+ * offscreen images with async decoding.
  */
-export const SafeImage: React.FC<SafeImageProps> = ({
+export const SafeImage: React.FC<SafeImageProps> = memo(({
   src,
   alt,
   className = '',
   fallbackTitle,
+  priority = false,
 }) => {
-  const [failed, setFailed] = useState(false);
+  const normalizedPrimary = toDriveImageUrl(src);
+  const driveId = extractDriveFileId(src);
+  const thumbnailFallback = driveId ? toDriveThumbnailUrl(src, 1000) : '';
 
-  if (failed || !src) {
+  const [stage, setStage] = useState<'primary' | 'thumbnail' | 'failed'>('primary');
+
+  useEffect(() => {
+    setStage(normalizedPrimary ? 'primary' : 'failed');
+  }, [normalizedPrimary]);
+
+  const activeSrc =
+    stage === 'primary'
+      ? normalizedPrimary
+      : stage === 'thumbnail'
+        ? thumbnailFallback
+        : '';
+
+  if (stage === 'failed' || !activeSrc) {
     return (
       <div
         role="img"
@@ -37,11 +62,23 @@ export const SafeImage: React.FC<SafeImageProps> = ({
 
   return (
     <img
-      src={src}
+      key={activeSrc}
+      src={activeSrc}
       alt={alt}
+      loading={priority ? 'eager' : 'lazy'}
+      decoding="async"
+      fetchPriority={priority ? 'high' : 'auto'}
       referrerPolicy="no-referrer"
-      onError={() => setFailed(true)}
+      onError={() => {
+        if (stage === 'primary' && thumbnailFallback && thumbnailFallback !== normalizedPrimary) {
+          setStage('thumbnail');
+        } else {
+          setStage('failed');
+        }
+      }}
       className={className}
     />
   );
-};
+});
+
+SafeImage.displayName = 'SafeImage';

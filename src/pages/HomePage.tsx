@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowRight, Calendar, ChevronRight, Code2, Megaphone, Trophy, Users } from 'lucide-react';
@@ -21,19 +21,35 @@ export const HomePage: React.FC = () => {
     can,
   } = useApp();
 
-  const approvedAnnouncements = announcements.filter((a) => a.status === 'approved');
-  const approvedEvents = events.filter((e) => e.status === 'approved');
-  const upcomingEvents = approvedEvents
-    .filter((e) => new Date(e.dateISO).getTime() > Date.now())
-    .sort((a, b) => new Date(a.dateISO).getTime() - new Date(b.dateISO).getTime());
+  const approvedAnnouncements = useMemo(
+    () => announcements.filter((a) => a.status === 'approved'),
+    [announcements]
+  );
+  const approvedEvents = useMemo(
+    () => events.filter((e) => e.status === 'approved'),
+    [events]
+  );
+  const upcomingEvents = useMemo(
+    () =>
+      approvedEvents
+        .filter((e) => new Date(e.dateISO).getTime() > Date.now())
+        .sort((a, b) => new Date(a.dateISO).getTime() - new Date(b.dateISO).getTime()),
+    [approvedEvents]
+  );
   const nextEvent = upcomingEvents[0];
 
-  const topThree = [...leaderboard].sort((a, b) => b.score - a.score).slice(0, 3);
-  const totalProblemsSolved = leaderboard.reduce(
-    (sum, entry) => sum + (Number(entry.problemsSolved) || 0),
-    0
+  const topThree = useMemo(
+    () => [...leaderboard].sort((a, b) => b.score - a.score).slice(0, 3),
+    [leaderboard]
   );
-  const activeTracksCount = new Set(resources.map((r) => r.track)).size;
+  const totalProblemsSolved = useMemo(
+    () => leaderboard.reduce((sum, entry) => sum + (Number(entry.problemsSolved) || 0), 0),
+    [leaderboard]
+  );
+  const activeTracksCount = useMemo(
+    () => new Set(resources.map((r) => r.track)).size,
+    [resources]
+  );
 
   return (
     <div>
@@ -116,7 +132,7 @@ export const HomePage: React.FC = () => {
               </p>
 
               <div className="flex flex-wrap items-center gap-3 pt-2">
-                {can('canSubmitJoinRequest') ? (
+                {can('canSubmitJoinRequest') && siteSettings.applicationsOpen ? (
                   <Link
                     to="/join"
                     className="px-6 py-3 rounded-lg font-semibold text-sm bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors inline-flex items-center gap-2 whitespace-nowrap shrink-0"
@@ -164,6 +180,7 @@ export const HomePage: React.FC = () => {
                   alt="Paavai Engineering College students collaborating during a HackerRank Campus Crew coding session"
                   className="w-full h-full object-cover"
                   fallbackTitle="Paavai Campus Coding Lab"
+                  priority
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-[#0B0F14]/90 via-[#0B0F14]/30 to-transparent" />
                 <div className="absolute bottom-0 inset-x-0 p-6 text-white">
@@ -404,16 +421,19 @@ export const HomePage: React.FC = () => {
               Ready to represent Paavai on the HackerRank leaderboard?
             </h2>
             <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400">
-              Apply for membership to unlock complete DSA & SQL study tracks, members-only coding
-              clinics, and verified contest rankings.
+              {!currentUser && siteSettings.applicationsOpen
+                ? 'Apply for membership to unlock complete DSA & SQL study tracks, members-only coding clinics, and verified contest rankings.'
+                : 'Explore upcoming campus coding contests, structured DSA & SQL practice tracks, and live leaderboard standings.'}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             <Link
-              to={currentUser ? '/events' : '/join'}
+              to={!currentUser && siteSettings.applicationsOpen ? '/join' : '/events'}
               className="px-6 py-3 rounded-lg text-sm font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors whitespace-nowrap shrink-0"
             >
-              {currentUser ? 'Browse Upcoming Contests' : 'Submit Join Request'}
+              {!currentUser && siteSettings.applicationsOpen
+                ? 'Submit Join Request'
+                : 'Browse Upcoming Contests'}
             </Link>
             <Link
               to="/contact"

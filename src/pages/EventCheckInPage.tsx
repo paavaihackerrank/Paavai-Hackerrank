@@ -2,9 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   AlertCircle,
+  Award,
   Camera,
   CameraOff,
   CheckCircle2,
+  Download,
+  ExternalLink,
   LogIn,
   MapPin,
   RefreshCw,
@@ -14,6 +17,7 @@ import { EventCheckIn, EventCheckInCode } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 import { NotificationBanner } from '../components/NotificationBanner';
 import { PageSeo } from '../components/PageSeo';
+import { downloadCertificatePng } from '../lib/certificateCanvas';
 
 interface BarcodeDetectorResult {
   rawValue?: string;
@@ -38,8 +42,11 @@ export const EventCheckInPage: React.FC = () => {
     needsEmailVerification,
     unverifiedEmail,
     eventCheckIns,
+    certificates,
+    siteSettings,
     lookupEventCheckInCode,
     checkInAttendeeWithCode,
+    claimParticipationCertificate,
   } = useApp();
 
   const [manualCode, setManualCode] = useState(urlCode);
@@ -47,7 +54,25 @@ export const EventCheckInPage: React.FC = () => {
   const [confirmedCheckIn, setConfirmedCheckIn] = useState<EventCheckIn | null>(null);
   const [alreadyCheckedIn, setAlreadyCheckedIn] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [claimingEventId, setClaimingEventId] = useState<string | null>(null);
   const [error, setError] = useState('');
+
+  const handleClaimAndDownload = async (eventId: string) => {
+    setClaimingEventId(eventId);
+    const res = await claimParticipationCertificate(eventId);
+    setClaimingEventId(null);
+    if (res.ok && res.certificate) {
+      const origin =
+        typeof window !== 'undefined' && window.location?.origin
+          ? window.location.origin
+          : 'https://paavai-hackerrank.web.app';
+      downloadCertificatePng({
+        certificate: res.certificate,
+        verificationUrl: `${origin}/certificates/${encodeURIComponent(res.certificate.certId)}`,
+        leadName: siteSettings.leadName || 'Campus Lead',
+      });
+    }
+  };
 
   // Camera scanner state
   const [cameraActive, setCameraActive] = useState(false);
@@ -360,6 +385,45 @@ export const EventCheckInPage: React.FC = () => {
               </div>
             )}
           </dl>
+
+          <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-slate-600 dark:text-slate-400 inline-flex items-center gap-1.5">
+              <Award className="w-4 h-4 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
+              <span>Your verified QR check-in unlocks your official Participation E-Certificate.</span>
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={claimingEventId === confirmedCheckIn.eventId}
+                onClick={() => handleClaimAndDownload(confirmedCheckIn.eventId)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] disabled:opacity-60 inline-flex items-center gap-1.5 whitespace-nowrap"
+              >
+                <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>
+                  {claimingEventId === confirmedCheckIn.eventId
+                    ? 'Generating PNG...'
+                    : 'Claim & Download E-Certificate'}
+                </span>
+              </button>
+              {(() => {
+                const cert = certificates.find(
+                  (ct) =>
+                    ct.eventId === confirmedCheckIn.eventId &&
+                    ct.recipientUid === confirmedCheckIn.userId
+                );
+                if (!cert) return null;
+                return (
+                  <Link
+                    to={`/certificates/${encodeURIComponent(cert.certId)}`}
+                    className="px-3 py-2 rounded-lg text-xs font-semibold border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#00EA64] inline-flex items-center gap-1 whitespace-nowrap"
+                  >
+                    <span>Verify Page</span>
+                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                  </Link>
+                );
+              })()}
+            </div>
+          </div>
         </section>
       )}
 
@@ -535,30 +599,58 @@ export const EventCheckInPage: React.FC = () => {
             ) : (
               eventCheckIns
                 .filter((c) => c.userId === currentUser.id)
-                .map((c) => (
-                  <div
-                    key={c.id}
-                    className="px-6 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white truncate">
-                        {c.eventTitle}
-                      </p>
-                      <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
-                        {c.checkInCode} · {c.registerNumber}
-                      </p>
+                .map((c) => {
+                  const cert = certificates.find(
+                    (ct) => ct.eventId === c.eventId && ct.recipientUid === currentUser.id
+                  );
+                  return (
+                    <div
+                      key={c.id}
+                      className="px-6 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white truncate">
+                          {c.eventTitle}
+                        </p>
+                        <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                          {c.checkInCode} · {c.registerNumber} ·{' '}
+                          {new Date(c.checkedInAt).toLocaleString('en-IN', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          disabled={claimingEventId === c.eventId}
+                          onClick={() => handleClaimAndDownload(c.eventId)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#00EA64]/15 text-[#009942] dark:text-[#00EA64] hover:bg-[#00EA64]/25 inline-flex items-center gap-1.5 whitespace-nowrap"
+                        >
+                          <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>
+                            {claimingEventId === c.eventId
+                              ? 'Generating...'
+                              : cert
+                              ? 'Download E-Certificate'
+                              : 'Claim E-Certificate'}
+                          </span>
+                        </button>
+                        {cert && (
+                          <Link
+                            to={`/certificates/${encodeURIComponent(cert.certId)}`}
+                            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-[#00EA64]"
+                            title="Open Public Verification Link"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                          </Link>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-xs font-mono tabular-nums text-[#009942] dark:text-[#00EA64] shrink-0">
-                      Checked in{' '}
-                      {new Date(c.checkedInAt).toLocaleString('en-IN', {
-                        day: 'numeric',
-                        month: 'short',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </p>
-                  </div>
-                ))
+                  );
+                })
             )}
           </div>
         </section>

@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Circle, ExternalLink, Lock, X } from 'lucide-react';
+import { CheckCircle2, Circle, ExternalLink, FileText, Lock, X } from 'lucide-react';
 import { ResourceTrack, CHAPTER_IMAGES } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
+import { isGoogleDriveUrl } from '../lib/driveUtils';
+import { DriveDocumentViewer } from '../components/DriveDocumentViewer';
 import { PageSeo } from '../components/PageSeo';
 
 const TRACKS: Array<'All' | ResourceTrack> = [
@@ -19,6 +21,7 @@ export const ResourcesPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryFilter = (searchParams.get('q') || '').trim();
   const [selectedTrack, setSelectedTrack] = useState<'All' | ResourceTrack>('All');
+  const [viewerDoc, setViewerDoc] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
 
   const canViewFull = can('canViewFullResources');
 
@@ -231,15 +234,33 @@ export const ResourcesPage: React.FC = () => {
                       </span>
                     )}
 
-                    <a
-                      href={res.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 text-xs font-mono font-semibold text-slate-900 dark:text-white hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors whitespace-nowrap shrink-0"
-                    >
-                      <span>Open Practice</span>
-                      <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
-                    </a>
+                    <div className="flex items-center gap-3">
+                      {(res.documentUrl || isGoogleDriveUrl(res.url)) && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setViewerDoc({
+                              url: res.documentUrl || res.url,
+                              title: res.title,
+                              subtitle: `${res.track} · ${res.level}`,
+                            })
+                          }
+                          className="inline-flex items-center gap-1 text-xs font-mono font-semibold text-[#009942] dark:text-[#00EA64] hover:underline whitespace-nowrap shrink-0"
+                        >
+                          <FileText className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Study Doc</span>
+                        </button>
+                      )}
+                      <a
+                        href={res.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-mono font-semibold text-slate-900 dark:text-white hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors whitespace-nowrap shrink-0"
+                      >
+                        <span>Open Practice</span>
+                        <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                      </a>
+                    </div>
                   </>
                 )}
               </div>
@@ -248,6 +269,13 @@ export const ResourcesPage: React.FC = () => {
         })}
       </div>
       )}
+
+      <DriveDocumentViewer
+        url={viewerDoc?.url ?? null}
+        title={viewerDoc?.title}
+        subtitle={viewerDoc?.subtitle}
+        onClose={() => setViewerDoc(null)}
+      />
     </div>
   );
 };

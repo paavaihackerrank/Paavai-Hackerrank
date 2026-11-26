@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { CalendarDays, Plus, Trash2, X } from 'lucide-react';
+import { CalendarDays, CheckCircle2, FileText, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import {
   CODING_PLATFORMS,
   CodingActivity,
@@ -7,6 +7,8 @@ import {
   EventCheckIn,
   UserAccount,
 } from '../config/rbacAndData';
+import { DRIVE_SHARING_HINT, validateDriveOrHttpsUrl } from '../lib/driveUtils';
+import { DriveDocumentViewer } from './DriveDocumentViewer';
 
 interface CodingActivityHeatmapProps {
   user: UserAccount;
@@ -17,8 +19,17 @@ interface CodingActivityHeatmapProps {
     date: string;
     count: number;
     title: string;
+    notesUrl?: string;
   }) => Promise<{ ok: boolean; error?: string }>;
   onDeleteActivity: (activityId: string) => Promise<void>;
+  onSyncHackerRank?: (manualSolvedTotal?: number) => Promise<{
+    ok: boolean;
+    delta?: number;
+    totalSolved?: number;
+    source?: 'hackerrank_api' | 'manual_sync';
+    corsBlocked?: boolean;
+    error?: string;
+  }>;
 }
 
 interface UnifiedActivityEntry {
@@ -27,6 +38,7 @@ interface UnifiedActivityEntry {
   date: string;
   count: number;
   title: string;
+  notesUrl?: string;
   source: 'logged' | 'checkin';
 }
 
@@ -78,11 +90,19 @@ export const CodingActivityHeatmap: React.FC<CodingActivityHeatmapProps> = ({
   eventCheckIns,
   onLogActivity,
   onDeleteActivity,
+  onSyncHackerRank,
 }) => {
   const todayStr = useMemo(() => toLocalYYYYMMDD(new Date()), []);
   const [platformFilter, setPlatformFilter] = useState<'All' | CodingPlatform>('All');
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [hoveredCell, setHoveredCell] = useState<{ date: string; count: number } | null>(null);
+  const [viewerDoc, setViewerDoc] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
+
+  // HackerRank sync state
+  const [syncingHr, setSyncingHr] = useState(false);
+  const [showManualSync, setShowManualSync] = useState(false);
+  const [manualHrTotal, setManualHrTotal] = useState('');
+  const [syncFeedback, setSyncFeedback] = useState('');
 
   // Inline log completion form state
   const [showLogForm, setShowLogForm] = useState(false);
@@ -90,8 +110,14 @@ export const CodingActivityHeatmap: React.FC<CodingActivityHeatmapProps> = ({
   const [formDate, setFormDate] = useState<string>(todayStr);
   const [formCount, setFormCount] = useState<string>('2');
   const [formTitle, setFormTitle] = useState<string>('');
+  const [formNotesUrl, setFormNotesUrl] = useState<string>('');
   const [formError, setFormError] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
+
+  const notesValidation = useMemo(
+    () => validateDriveOrHttpsUrl(formNotesUrl, { allowEmpty: true }),
+    [formNotesUrl]
+  );
 
   // Combine Firestore coding_activities with the user's QR event check-ins
   const unifiedEntries = useMemo<UnifiedActivityEntry[]>(() => {
@@ -101,6 +127,7 @@ export const CodingActivityHeatmap: React.FC<CodingActivityHeatmapProps> = ({
       date: act.date,
       count: act.count,
       title: act.title,
+      notesUrl: act.notesUrl,
       source: 'logged',
     }));
 
@@ -247,6 +274,30 @@ export const CodingActivityHeatmap: React.FC<CodingActivityHeatmapProps> = ({
 
   const recentEntries = useMemo(() => filteredEntries.slice(0, 5), [filteredEntries]);
 
+  const handleSyncHackerRank = async (manualCount?: number) => {
+    if (!onSyncHackerRank || syncingHr) return;
+    setSyncingHr(true);
+    setSyncFeedback('');
+    const res = await onSyncHackerRank(manualCount);
+    setSyncingHr(false);
+    if (res.ok) {
+      setShowManualSync(false);
+      setManualHrTotal('');
+      setSyncFeedback(
+        res.delta && res.delta > 0
+          ? `Synced +${res.delta} solved problems (+${res.delta * 10} leaderboard pts).`
+          : `HackerRank standing aligned (${res.totalSolved ?? 0} total solved).`
+      );
+    } else if (res.corsBlocked) {
+      setShowManualSync(true);
+      setSyncFeedback(
+        'Direct browser fetch was restricted by HackerRank CORS. Enter your current HackerRank solved count below to sync instantly (nightly GitHub Actions also auto-syncs).'
+      );
+    } else if (res.error) {
+      setSyncFeedback(res.error);
+    }
+  };
+
   const handleLogSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
@@ -264,6 +315,10 @@ export const CodingActivityHeatmap: React.FC<CodingActivityHeatmapProps> = ({
       setFormError('Select a valid date.');
       return;
     }
+    if (formNotesUrl.trim() && !notesValidation.valid) {
+      setFormError(notesValidation.error || 'Enter a valid Google Drive or https:// link for solution notes.');
+      return;
+    }
 
     setSubmitting(true);
     const res = await onLogActivity({
@@ -271,6 +326,7 @@ export const CodingActivityHeatmap: React.FC<CodingActivityHeatmapProps> = ({
       date: formDate,
       count: parsedCount,
       title: formTitle.trim(),
+      notesUrl: formNotesUrl.trim() || undefined,
     });
     setSubmitting(false);
 
@@ -281,6 +337,7 @@ export const CodingActivityHeatmap: React.FC<CodingActivityHeatmapProps> = ({
 
     setSelectedDate(formDate);
     setFormTitle('');
+    setFormNotesUrl('');
     setFormCount('2');
     setShowLogForm(false);
   };
@@ -308,27 +365,80 @@ export const CodingActivityHeatmap: React.FC<CodingActivityHeatmapProps> = ({
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            setFormError('');
-            setShowLogForm((prev) => !prev);
-          }}
-          className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 self-start sm:self-auto"
-        >
-          {showLogForm ? (
-            <>
-              <X className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Close Form</span>
-            </>
-          ) : (
-            <>
-              <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Log Completion</span>
-            </>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          {onSyncHackerRank && (
+            <button
+              type="button"
+              disabled={syncingHr}
+              onClick={() => handleSyncHackerRank()}
+              className="px-3.5 py-2 rounded-lg text-xs font-mono font-semibold border border-[#00EA64]/50 bg-[#00EA64]/10 text-[#009942] dark:text-[#00EA64] hover:bg-[#00EA64]/20 disabled:opacity-60 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncingHr ? 'animate-spin' : ''}`} aria-hidden="true" />
+              <span>{syncingHr ? 'Syncing…' : 'Sync HackerRank Practice'}</span>
+            </button>
           )}
-        </button>
+          <button
+            type="button"
+            onClick={() => {
+              setFormError('');
+              setShowLogForm((prev) => !prev);
+            }}
+            className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+          >
+            {showLogForm ? (
+              <>
+                <X className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Close Form</span>
+              </>
+            ) : (
+              <>
+                <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Log Completion</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
+
+      {/* Sync feedback / CORS manual count prompt */}
+      {(syncFeedback || showManualSync) && (
+        <div className="p-3.5 rounded-lg border border-[#00EA64]/35 bg-[#00EA64]/5 space-y-2.5">
+          {syncFeedback && (
+            <p className="text-xs font-mono text-slate-700 dark:text-slate-200">{syncFeedback}</p>
+          )}
+          {showManualSync && onSyncHackerRank && (
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                max={5000}
+                value={manualHrTotal}
+                onChange={(e) => setManualHrTotal(e.target.value)}
+                placeholder="Current HackerRank total solved (e.g. 42)"
+                className="h-8 px-2.5 w-64 rounded-md text-xs font-mono bg-white dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
+              />
+              <button
+                type="button"
+                disabled={syncingHr || !manualHrTotal}
+                onClick={() => handleSyncHackerRank(Math.max(0, Math.floor(Number(manualHrTotal))))}
+                className="px-3 py-1.5 rounded-md text-xs font-mono font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] disabled:opacity-60"
+              >
+                Apply &amp; Align Leaderboard
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowManualSync(false);
+                  setSyncFeedback('');
+                }}
+                className="px-2 py-1 text-xs font-mono text-slate-500 hover:text-slate-800 dark:hover:text-white"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Inline Log Completion Form */}
       {showLogForm && (
@@ -396,6 +506,30 @@ export const CodingActivityHeatmap: React.FC<CodingActivityHeatmapProps> = ({
                 onChange={(e) => setFormTitle(e.target.value)}
                 className="w-full h-9 px-2.5 rounded-md text-xs bg-white dark:bg-[#121821] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
               />
+            </div>
+
+            <div className="sm:col-span-12">
+              <label className="block text-xs font-mono text-slate-500 dark:text-slate-400 mb-1">
+                Optional Solution Notes / Document Link (Google Drive PDF, Docs, Slides, or HTTPS)
+              </label>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <input
+                  type="url"
+                  value={formNotesUrl}
+                  onChange={(e) => setFormNotesUrl(e.target.value)}
+                  placeholder="https://drive.google.com/file/d/.../view"
+                  className="flex-1 h-9 px-2.5 rounded-md text-xs font-mono bg-white dark:bg-[#121821] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
+                />
+                {formNotesUrl.trim() && notesValidation.valid && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-mono bg-[#00EA64]/15 text-[#009942] dark:text-[#00EA64] shrink-0">
+                    <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>{notesValidation.isDrive ? 'Drive Link Ready' : 'HTTPS Link Ready'}</span>
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 mt-1">
+                {formNotesUrl.trim() ? notesValidation.hint : DRIVE_SHARING_HINT}
+              </p>
             </div>
           </div>
 
@@ -615,16 +749,34 @@ export const CodingActivityHeatmap: React.FC<CodingActivityHeatmapProps> = ({
                       {item.platform} · {item.count} completion{item.count === 1 ? '' : 's'}
                     </p>
                   </div>
-                  {item.source === 'logged' && (
-                    <button
-                      type="button"
-                      onClick={() => onDeleteActivity(item.id)}
-                      aria-label={`Delete activity ${item.title}`}
-                      className="p-1.5 rounded text-slate-400 hover:text-red-500 transition-colors shrink-0"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {item.notesUrl && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setViewerDoc({
+                            url: item.notesUrl!,
+                            title: item.title,
+                            subtitle: `${item.platform} · ${item.date}`,
+                          })
+                        }
+                        className="px-2 py-1 rounded text-[11px] font-mono border border-[#00EA64]/40 bg-[#00EA64]/10 text-[#009942] dark:text-[#00EA64] hover:bg-[#00EA64]/20 inline-flex items-center gap-1"
+                      >
+                        <FileText className="w-3 h-3" aria-hidden="true" />
+                        <span>Notes</span>
+                      </button>
+                    )}
+                    {item.source === 'logged' && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteActivity(item.id)}
+                        aria-label={`Delete activity ${item.title}`}
+                        className="p-1.5 rounded text-slate-400 hover:text-red-500 transition-colors shrink-0"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -680,22 +832,47 @@ export const CodingActivityHeatmap: React.FC<CodingActivityHeatmapProps> = ({
                       {item.count === 1 ? '' : 's'}
                     </p>
                   </div>
-                  {item.source === 'logged' && (
-                    <button
-                      type="button"
-                      onClick={() => onDeleteActivity(item.id)}
-                      aria-label={`Delete activity ${item.title}`}
-                      className="p-1.5 rounded text-slate-400 hover:text-red-500 transition-colors shrink-0"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {item.notesUrl && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setViewerDoc({
+                            url: item.notesUrl!,
+                            title: item.title,
+                            subtitle: `${item.platform} · ${item.date}`,
+                          })
+                        }
+                        className="px-2 py-1 rounded text-[11px] font-mono border border-[#00EA64]/40 bg-[#00EA64]/10 text-[#009942] dark:text-[#00EA64] hover:bg-[#00EA64]/20 inline-flex items-center gap-1"
+                      >
+                        <FileText className="w-3 h-3" aria-hidden="true" />
+                        <span>Notes</span>
+                      </button>
+                    )}
+                    {item.source === 'logged' && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteActivity(item.id)}
+                        aria-label={`Delete activity ${item.title}`}
+                        className="p-1.5 rounded text-slate-400 hover:text-red-500 transition-colors shrink-0"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         )}
       </div>
+
+      <DriveDocumentViewer
+        url={viewerDoc?.url ?? null}
+        title={viewerDoc?.title}
+        subtitle={viewerDoc?.subtitle}
+        onClose={() => setViewerDoc(null)}
+      />
     </section>
   );
 };

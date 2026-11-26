@@ -35,16 +35,26 @@ interface SpotlightCandidate {
 
 const normalize = (v?: string) => (v || '').trim().toLowerCase().replace(/^@/, '');
 
-function getWeekNumber(now = new Date()): number {
-  const startOfYear = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-  const diffDays = Math.floor((now.getTime() - startOfYear.getTime()) / 86_400_000);
-  return Math.floor(diffDays / 7) + now.getUTCFullYear() * 53;
+/**
+ * Returns a deterministic monotonically increasing Monday-aligned ISO week index.
+ * Advances every Monday 00:00 UTC so the featured member automatically rotates weekly.
+ */
+function getIsoWeekIndex(now = new Date()): number {
+  const utcDay = now.getUTCDay(); // 0=Sun, 1=Mon, ... 6=Sat
+  const daysSinceMonday = (utcDay + 6) % 7;
+  const mondayUtc = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() - daysSinceMonday
+  );
+  // Reference Monday: 2024-01-01T00:00:00Z
+  const epochMonday = Date.UTC(2024, 0, 1);
+  return Math.max(0, Math.floor((mondayUtc - epochMonday) / (7 * 86_400_000)));
 }
 
 /**
- * Weekly Member Spotlight component on HomePage that dynamically selects and
- * highlights a community member each week from live Firestore data, showcasing
- * their leaderboard achievements, completed roadmap modules, and social links.
+ * Weekly Member Spotlight component on HomePage that deterministically rotates
+ * every Monday across active top contributors from live Firestore data.
  */
 export const MemberSpotlight: React.FC = () => {
   const { publicProfiles, leaderboard, teamMembers, resources } = useApp();
@@ -52,12 +62,17 @@ export const MemberSpotlight: React.FC = () => {
   const totalDsaModules = resources.filter((r) => r.track === 'DSA').length;
 
   const { spotlight, totalCandidates } = useMemo(() => {
-    const sortedLb = [...leaderboard].sort((a, b) => b.score - a.score);
+    const sortedLb = [...leaderboard].sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const solvedDiff = (b.solvedCount ?? b.problemsSolved) - (a.solvedCount ?? a.problemsSolved);
+      if (solvedDiff !== 0) return solvedDiff;
+      return (b.eventsAttended ?? 0) - (a.eventsAttended ?? 0);
+    });
     const map = new Map<string, SpotlightCandidate>();
 
     // 1. Seed from non-PII public_profiles (includes roadmap counts + social links)
     publicProfiles.forEach((p) => {
-      const key = normalize(p.hackerRankHandle) || p.uid;
+      const key = p.uid || normalize(p.hackerRankHandle) || p.id;
       map.set(key, {
         key,
         profileId: p.uid || p.id,
@@ -72,6 +87,7 @@ export const MemberSpotlight: React.FC = () => {
         linkedinUrl: p.linkedinUrl,
         completedDsaCount: p.completedDsaCount,
         completedRoadmapCount: p.completedRoadmapCount,
+        problemsSolved: p.hackerRankSolvedCount,
         skills: p.skills || [],
       });
     });
@@ -81,19 +97,26 @@ export const MemberSpotlight: React.FC = () => {
       const handleKey = normalize(entry.hackerRankHandle);
       const nameKey = normalize(entry.name);
       const existing =
-        (handleKey && map.get(handleKey)) ||
-        Array.from(map.values()).find((c) => normalize(c.name) === nameKey);
+        (entry.uid && map.get(entry.uid)) ||
+        Array.from(map.values()).find(
+          (c) =>
+            (handleKey && normalize(c.hackerRankHandle) === handleKey) ||
+            normalize(c.name) === nameKey
+        );
 
       if (existing) {
         existing.rank = idx + 1;
         existing.score = entry.score;
-        existing.problemsSolved = entry.problemsSolved;
+        existing.problemsSolved = Math.max(
+          existing.problemsSolved ?? 0,
+          entry.solvedCount ?? entry.problemsSolved
+        );
         if (!existing.hackerRankHandle) existing.hackerRankHandle = entry.hackerRankHandle;
       } else {
-        const key = handleKey || `lb_${entry.id}`;
+        const key = entry.uid || handleKey || `lb_${entry.id}`;
         map.set(key, {
           key,
-          profileId: entry.hackerRankHandle || entry.id,
+          profileId: entry.uid || entry.hackerRankHandle || entry.id,
           name: entry.name,
           department: entry.department,
           year: entry.year,
@@ -104,7 +127,7 @@ export const MemberSpotlight: React.FC = () => {
             : undefined,
           rank: idx + 1,
           score: entry.score,
-          problemsSolved: entry.problemsSolved,
+          problemsSolved: entry.solvedCount ?? entry.problemsSolved,
           skills: ['Algorithms', 'Problem Solving'],
         });
       }
@@ -115,15 +138,19 @@ export const MemberSpotlight: React.FC = () => {
       const handleKey = normalize(tm.hackerRankHandle);
       const nameKey = normalize(tm.name);
       const existing =
-        (handleKey && map.get(handleKey)) ||
-        Array.from(map.values()).find((c) => normalize(c.name) === nameKey);
+        (tm.uid && map.get(tm.uid)) ||
+        Array.from(map.values()).find(
+          (c) =>
+            (handleKey && normalize(c.hackerRankHandle) === handleKey) ||
+            normalize(c.name) === nameKey
+        );
 
       if (existing) {
         existing.designation = tm.designation;
         if (!existing.bio && tm.bio) existing.bio = tm.bio;
         if (!existing.photoUrl && tm.photoUrl) existing.photoUrl = tm.photoUrl;
       } else {
-        const key = handleKey || `tm_${tm.id}`;
+        const key = tm.uid || handleKey || `tm_${tm.id}`;
         map.set(key, {
           key,
           profileId: tm.uid || tm.id,
@@ -139,15 +166,39 @@ export const MemberSpotlight: React.FC = () => {
       }
     });
 
-    const list = Array.from(map.values());
-    if (list.length === 0) {
+    // Rank active top contributors deterministically so Monday rotation cycles top contributors
+    const allCandidates = Array.from(map.values()).sort((a, b) => {
+      const contribA =
+        (a.score ?? 0) +
+        (a.completedRoadmapCount ?? 0) * 15 +
+        (a.problemsSolved ?? 0) * 5 +
+        (a.designation ? 25 : 0);
+      const contribB =
+        (b.score ?? 0) +
+        (b.completedRoadmapCount ?? 0) * 15 +
+        (b.problemsSolved ?? 0) * 5 +
+        (b.designation ? 25 : 0);
+      if (contribB !== contribA) return contribB - contribA;
+      return a.name.localeCompare(b.name);
+    });
+
+    if (allCandidates.length === 0) {
       return { spotlight: null, totalCandidates: 0 };
     }
 
-    const weekIndex = getWeekNumber() % list.length;
+    const activeTopPool = allCandidates.filter(
+      (c) =>
+        (c.score ?? 0) > 0 ||
+        (c.completedRoadmapCount ?? 0) > 0 ||
+        (c.problemsSolved ?? 0) > 0 ||
+        Boolean(c.designation)
+    );
+    const rotationPool = (activeTopPool.length > 0 ? activeTopPool : allCandidates).slice(0, 12);
+
+    const weekIndex = getIsoWeekIndex() % rotationPool.length;
     return {
-      spotlight: list[weekIndex],
-      totalCandidates: list.length,
+      spotlight: rotationPool[weekIndex],
+      totalCandidates: rotationPool.length,
     };
   }, [publicProfiles, leaderboard, teamMembers]);
 

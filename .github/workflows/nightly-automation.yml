@@ -1,0 +1,40 @@
+name: HRCC Paavai Nightly Spark Automation
+
+on:
+  schedule:
+    # Runs daily at 20:30 UTC (02:00 IST)
+    - cron: '30 20 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nightly-sync:
+    name: Purge Unverified Users, Sync HackerRank & Unstop, Re-Rank Leaderboard & Send Queued Emails
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install firebase-admin and nodemailer (Spark Plan — no Blaze Functions)
+        run: npm install --no-save firebase-admin nodemailer
+
+      - name: Run nightly automation script
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIRESTORE_DATABASE_ID: ai-studio-hackerrankcampus-521e66b2-ef2a-4b15-a7c4-9be9472b4dbc
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: node scripts/nightly-automation.mjs

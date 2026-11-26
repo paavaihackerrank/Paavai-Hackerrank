@@ -144,53 +144,53 @@ export const TeamPage: React.FC = () => {
             ) : (
               <div className="space-y-4">
                 {leads.map((lead) => (
-                  <article
+                  <Link
                     key={lead.id}
-                    className="p-6 sm:p-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] flex flex-col md:flex-row md:items-center gap-6"
+                    to={`/members/${encodeURIComponent(lead.uid || lead.id)}`}
+                    aria-label={`View profile of ${lead.name}, ${lead.designation}`}
+                    className="group block p-6 sm:p-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] hover:border-[#00EA64]/60 hover:-translate-y-0.5 hover:shadow-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00EA64]"
                   >
-                    <MemberAvatar
-                      name={lead.name}
-                      photoUrl={lead.photoUrl}
-                      variant="lead"
-                      sizeClass="w-20 h-20 sm:w-24 sm:h-24"
-                      textClass="text-2xl"
-                    />
-                    <div className="flex-1 space-y-2.5 min-w-0">
-                      <div className="inline-flex items-center gap-1.5 text-xs font-mono text-[#009942] dark:text-[#00EA64]">
-                        <ShieldCheck className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                        <span>
-                          {lead.designation} · {lead.department} · {lead.year}
-                        </span>
-                      </div>
-                      <h3 className="font-mono text-2xl font-bold text-slate-900 dark:text-white">
-                        <Link
-                          to={`/members/${encodeURIComponent(lead.uid || lead.id)}`}
-                          className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors"
-                        >
+                    <article className="flex flex-col md:flex-row md:items-center gap-6">
+                      <MemberAvatar
+                        name={lead.name}
+                        photoUrl={lead.photoUrl}
+                        variant="lead"
+                        sizeClass="w-20 h-20 sm:w-24 sm:h-24"
+                        textClass="text-2xl"
+                      />
+                      <div className="flex-1 space-y-2.5 min-w-0">
+                        <div className="inline-flex items-center gap-1.5 text-xs font-mono text-[#009942] dark:text-[#00EA64]">
+                          <ShieldCheck className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                          <span>
+                            {lead.designation} · {lead.department} · {lead.year}
+                          </span>
+                        </div>
+                        <h3 className="font-mono text-2xl font-bold text-slate-900 dark:text-white group-hover:text-[#009942] dark:group-hover:text-[#00EA64] transition-colors">
                           {lead.name}
-                        </Link>
-                      </h3>
-                      {lead.bio && (
-                        <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed max-w-3xl">
-                          {lead.bio}
-                        </p>
-                      )}
-                      <div className="pt-2 flex flex-wrap items-center gap-4">
-                        {lead.hackerRankHandle && (
-                          <p className="inline-flex items-center gap-1.5 text-xs font-mono text-slate-500 dark:text-slate-400">
-                            <Code2 className="w-4 h-4 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
-                            <span>HackerRank: {lead.hackerRankHandle}</span>
+                        </h3>
+                        {lead.bio && (
+                          <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed max-w-3xl">
+                            {lead.bio}
                           </p>
                         )}
-                        <Link
-                          to={`/members/${encodeURIComponent(lead.uid || lead.id)}`}
-                          className="text-xs font-mono text-[#009942] dark:text-[#00EA64] hover:underline"
-                        >
-                          View Profile →
-                        </Link>
+                        <div className="pt-2 flex flex-wrap items-center justify-between gap-4">
+                          {lead.hackerRankHandle ? (
+                            <p className="inline-flex items-center gap-1.5 text-xs font-mono text-slate-500 dark:text-slate-400">
+                              <Code2 className="w-4 h-4 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
+                              <span>HackerRank: {lead.hackerRankHandle}</span>
+                            </p>
+                          ) : (
+                            <span className="text-xs font-mono text-slate-400 dark:text-slate-500">
+                              Campus Lead Profile
+                            </span>
+                          )}
+                          <span className="text-xs font-mono font-semibold text-[#009942] dark:text-[#00EA64] group-hover:translate-x-0.5 transition-transform inline-flex items-center gap-1">
+                            View Profile →
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  </article>
+                    </article>
+                  </Link>
                 ))}
               </div>
             )}
@@ -212,9 +212,11 @@ export const TeamPage: React.FC = () => {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {crewMembers.map((member) => (
-                  <article
+                  <Link
                     key={member.id}
-                    className="p-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] flex flex-col justify-between gap-4"
+                    to={`/members/${encodeURIComponent(member.uid || member.id)}`}
+                    aria-label={`View profile of ${member.name}, ${member.designation}`}
+                    className="group p-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] hover:border-[#00EA64]/60 hover:-translate-y-0.5 hover:shadow-lg transition-all flex flex-col justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00EA64]"
                   >
                     <div className="space-y-3">
                       <div className="flex items-center gap-3.5">
@@ -229,13 +231,8 @@ export const TeamPage: React.FC = () => {
                           <p className="font-mono text-[11px] text-[#009942] dark:text-[#00EA64]">
                             {member.designation}
                           </p>
-                          <h3 className="font-mono text-lg font-bold text-slate-900 dark:text-white truncate">
-                            <Link
-                              to={`/members/${encodeURIComponent(member.uid || member.id)}`}
-                              className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors"
-                            >
-                              {member.name}
-                            </Link>
+                          <h3 className="font-mono text-lg font-bold text-slate-900 dark:text-white group-hover:text-[#009942] dark:group-hover:text-[#00EA64] transition-colors truncate">
+                            {member.name}
                           </h3>
                           <p className="text-xs text-slate-500 dark:text-slate-400">
                             {member.department} · {member.year}
@@ -243,7 +240,7 @@ export const TeamPage: React.FC = () => {
                         </div>
                       </div>
                       {member.bio && (
-                        <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                        <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed line-clamp-3">
                           {member.bio}
                         </p>
                       )}
@@ -258,14 +255,11 @@ export const TeamPage: React.FC = () => {
                       ) : (
                         <span className="text-slate-400 dark:text-slate-500">Crew Mentor</span>
                       )}
-                      <Link
-                        to={`/members/${encodeURIComponent(member.uid || member.id)}`}
-                        className="text-[#009942] dark:text-[#00EA64] hover:underline whitespace-nowrap shrink-0"
-                      >
-                        Profile →
-                      </Link>
+                      <span className="text-[#009942] dark:text-[#00EA64] font-semibold group-hover:translate-x-0.5 transition-transform whitespace-nowrap shrink-0">
+                        View Profile →
+                      </span>
                     </div>
-                  </article>
+                  </Link>
                 ))}
               </div>
             )}

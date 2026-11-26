@@ -1,22 +1,39 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Check,
+  CheckCircle2,
+  Clock,
   Download,
+  ExternalLink,
+  Eye,
   Filter,
   Image as ImageIcon,
   Loader2,
+  Mail,
+  Phone,
+  RefreshCw,
   RotateCcw,
   Search,
+  Send,
+  ToggleLeft,
+  ToggleRight,
   Trash2,
   X,
 } from 'lucide-react';
 import {
   ACADEMIC_YEARS,
   DEPARTMENTS,
+  JoinRequest,
   ROLE_META,
   UserRole,
 } from '../config/rbacAndData';
 import { isValidOptionalImageUrl, useApp } from '../context/AppContext';
+import { DRIVE_SHARING_HINT, validateDriveOrHttpsUrl } from '../lib/driveUtils';
+import {
+  buildJoinRequestEmail,
+  buildJoinRequestMailtoHref,
+} from '../lib/joinRequestEmail';
+import { CAMPUS_LEAD_EMAIL } from '../lib/firebase';
 import { MemberAvatar } from '../components/MemberAvatar';
 
 export const MemberDirectoryPanel: React.FC = () => {
@@ -452,52 +469,75 @@ export const MemberDirectoryPanel: React.FC = () => {
                               {user.hackerRankHandle}
                             </p>
                           )}
-                          {editingPhotoUserId === user.id && (
-                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                              <input
-                                type="url"
-                                value={photoDraftUrl}
-                                onChange={(e) => setPhotoDraftUrl(e.target.value)}
-                                placeholder="https://example.com/photo.jpg"
-                                aria-label={`Image URL for ${user.name}`}
-                                className="h-8 px-2.5 rounded-md text-xs font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700 min-w-[210px] flex-1"
-                              />
-                              <button
-                                type="button"
-                                disabled={savingPhoto}
-                                onClick={async () => {
-                                  if (!isValidOptionalImageUrl(photoDraftUrl)) {
-                                    addToast(
-                                      'Invalid image URL',
-                                      'Use a direct https:// or http:// image link.',
-                                      'error'
-                                    );
-                                    return;
-                                  }
-                                  setSavingPhoto(true);
-                                  const res = await updateMemberPhotoUrl(user.id, photoDraftUrl);
-                                  setSavingPhoto(false);
-                                  if (res.ok) {
-                                    setEditingPhotoUserId(null);
-                                    setPhotoDraftUrl('');
-                                  }
-                                }}
-                                className="h-8 px-2.5 rounded-md text-[11px] font-mono font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] disabled:opacity-60"
-                              >
-                                {savingPhoto ? 'Saving...' : 'Save'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingPhotoUserId(null);
-                                  setPhotoDraftUrl('');
-                                }}
-                                className="h-8 px-2 rounded-md text-[11px] font-mono border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          )}
+                          {editingPhotoUserId === user.id && (() => {
+                            const draftValidation = validateDriveOrHttpsUrl(photoDraftUrl, {
+                              allowEmpty: true,
+                              allowRelative: true,
+                            });
+                            return (
+                              <div className="mt-2 space-y-1.5">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <MemberAvatar
+                                    name={user.name}
+                                    photoUrl={photoDraftUrl}
+                                    variant={user.role}
+                                    sizeClass="w-8 h-8"
+                                    roundedClass="rounded-md"
+                                    textClass="text-[10px]"
+                                  />
+                                  <input
+                                    type="url"
+                                    value={photoDraftUrl}
+                                    onChange={(e) => setPhotoDraftUrl(e.target.value)}
+                                    placeholder="https://drive.google.com/file/d/.../view"
+                                    aria-label={`Google Drive or Image URL for ${user.name}`}
+                                    className="h-8 px-2.5 rounded-md text-xs font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700 min-w-[210px] flex-1"
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={savingPhoto}
+                                    onClick={async () => {
+                                      if (!isValidOptionalImageUrl(photoDraftUrl) || !draftValidation.valid) {
+                                        addToast(
+                                          'Invalid image link',
+                                          draftValidation.error || 'Use a Google Drive share link or https:// image URL.',
+                                          'error'
+                                        );
+                                        return;
+                                      }
+                                      setSavingPhoto(true);
+                                      const res = await updateMemberPhotoUrl(user.id, photoDraftUrl);
+                                      setSavingPhoto(false);
+                                      if (res.ok) {
+                                        setEditingPhotoUserId(null);
+                                        setPhotoDraftUrl('');
+                                      }
+                                    }}
+                                    className="h-8 px-2.5 rounded-md text-[11px] font-mono font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] disabled:opacity-60"
+                                  >
+                                    {savingPhoto ? 'Saving...' : 'Save'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingPhotoUserId(null);
+                                      setPhotoDraftUrl('');
+                                    }}
+                                    className="h-8 px-2 rounded-md text-[11px] font-mono border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                                <p className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                                  {photoDraftUrl.trim()
+                                    ? draftValidation.valid
+                                      ? `✓ ${draftValidation.hint}`
+                                      : `✕ ${draftValidation.error}`
+                                    : DRIVE_SHARING_HINT}
+                                </p>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </td>
@@ -613,73 +653,587 @@ export const MemberDirectoryPanel: React.FC = () => {
 };
 
 export const JoinRequestsPanel: React.FC = () => {
-  const { joinRequests, reviewJoinRequest } = useApp();
+  const {
+    joinRequests,
+    reviewJoinRequest,
+    resendJoinRequestEmail,
+    deleteJoinRequest,
+    siteSettings,
+    updateSiteSettings,
+    users,
+    currentUser,
+    firebaseUser,
+  } = useApp();
+
+  const leadUser = useMemo(
+    () =>
+      users.find((u) => u.role === 'lead') ||
+      (currentUser?.role === 'lead' ? currentUser : null),
+    [users, currentUser]
+  );
+
+  const defaultLeadName =
+    (siteSettings.leadName || '').trim() || leadUser?.name || currentUser?.name || 'Campus Lead';
+  const defaultLeadPhone =
+    (siteSettings.leadPhone || '').trim() || leadUser?.phone || currentUser?.phone || '';
+  const defaultLeadEmail =
+    (siteSettings.contactEmail || '').trim() || leadUser?.email || CAMPUS_LEAD_EMAIL;
+
+  const [leadPhoneInput, setLeadPhoneInput] = useState(defaultLeadPhone);
+  const [savingPhone, setSavingPhone] = useState(false);
+  const [togglingIntake, setTogglingIntake] = useState(false);
+  const [notesById, setNotesById] = useState<Record<string, string>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [confirmDeleteReqId, setConfirmDeleteReqId] = useState<string | null>(null);
+  const [mailServerStatus, setMailServerStatus] = useState<{
+    checked: boolean;
+    configured: boolean;
+    provider: string;
+  }>({ checked: false, configured: false, provider: 'none' });
+  const [previewReq, setPreviewReq] = useState<{
+    req: JoinRequest;
+    decision: 'approved' | 'rejected';
+  } | null>(null);
+
+  useEffect(() => {
+    setLeadPhoneInput(defaultLeadPhone);
+  }, [defaultLeadPhone]);
+
+  useEffect(() => {
+    let active = true;
+    const checkMailStatus = async () => {
+      if (!firebaseUser) return;
+      try {
+        const token = await firebaseUser.getIdToken();
+        const res = await fetch('/api/mail/status', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          if (active) setMailServerStatus({ checked: true, configured: false, provider: 'none' });
+          return;
+        }
+        const data = (await res.json()) as { configured?: boolean; provider?: string };
+        if (active) {
+          setMailServerStatus({
+            checked: true,
+            configured: Boolean(data.configured),
+            provider: String(data.provider || 'none'),
+          });
+        }
+      } catch {
+        if (active) setMailServerStatus({ checked: true, configured: false, provider: 'none' });
+      }
+    };
+    void checkMailStatus();
+    return () => {
+      active = false;
+    };
+  }, [firebaseUser]);
+
+  const handleSaveLeadPhone = async () => {
+    if (savingPhone) return;
+    setSavingPhone(true);
+    await updateSiteSettings({
+      leadPhone: leadPhoneInput.trim(),
+      leadName: defaultLeadName,
+    });
+    setSavingPhone(false);
+  };
+
+  const handleReview = async (req: JoinRequest, decision: 'approved' | 'rejected') => {
+    if (busyId) return;
+    setBusyId(req.id);
+    await reviewJoinRequest(req.id, decision, {
+      reviewNote: (notesById[req.id] || '').trim(),
+      leadPhoneOverride: leadPhoneInput.trim(),
+    });
+    setBusyId(null);
+  };
+
+  const handleResend = async (req: JoinRequest) => {
+    if (busyId) return;
+    setBusyId(req.id);
+    await resendJoinRequestEmail(req.id, {
+      reviewNote: req.reviewNote,
+      leadPhoneOverride: leadPhoneInput.trim(),
+    });
+    setBusyId(null);
+  };
+
+  const handleToggleJoinRequests = async () => {
+    if (togglingIntake) return;
+    setTogglingIntake(true);
+    await updateSiteSettings({
+      applicationsOpen: !siteSettings.applicationsOpen,
+    });
+    setTogglingIntake(false);
+  };
+
+  const handleDeleteInquiry = async (requestId: string) => {
+    if (busyId) return;
+    setBusyId(requestId);
+    setConfirmDeleteReqId(null);
+    await deleteJoinRequest(requestId);
+    setBusyId(null);
+  };
+
+  const buildEmailPayloadFor = (req: JoinRequest, decision: 'approved' | 'rejected') => ({
+    applicantName: req.name,
+    applicantEmail: req.email,
+    registerNumber: req.registerNumber,
+    department: req.department,
+    year: req.year,
+    decision,
+    reviewNote: (notesById[req.id] ?? req.reviewNote ?? '').trim(),
+    leadName: defaultLeadName,
+    leadPhone: leadPhoneInput.trim(),
+    leadEmail: defaultLeadEmail,
+    chapterName: siteSettings.chapterName,
+    collegeName: siteSettings.collegeName,
+    portalUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+  });
 
   return (
-    <section className="space-y-3">
-      <h2 className="font-mono text-base font-bold text-slate-900 dark:text-white">
-        &ldquo;Join Us&rdquo; Form Applications ({joinRequests.length})
-      </h2>
+    <section className="space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <h2 className="font-mono text-base font-bold text-slate-900 dark:text-white">
+          &ldquo;Join Us&rdquo; Form Applications ({joinRequests.length})
+        </h2>
+        {mailServerStatus.checked && (
+          <span
+            className={`inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded-md border ${
+              mailServerStatus.configured
+                ? 'border-[#00EA64]/40 bg-[#00EA64]/10 text-[#009942] dark:text-[#00EA64]'
+                : 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+            }`}
+          >
+            <Mail className="w-3.5 h-3.5 shrink-0" />
+            {mailServerStatus.configured
+              ? `Automated Mail Active (${mailServerStatus.provider.toUpperCase()})`
+              : 'Add SMTP_USER & SMTP_PASS in Secrets for Auto-Send'}
+          </span>
+        )}
+      </div>
+
+      {/* Public Join Request Intake Visibility Toggle */}
+      <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="space-y-1 text-xs">
+          <p className="font-mono font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+            <span>Submit Join Request Button &amp; Crew Intake Visibility</span>
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider ${
+                siteSettings.applicationsOpen
+                  ? 'bg-[#00EA64]/15 text-[#009942] dark:text-[#00EA64]'
+                  : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              {siteSettings.applicationsOpen ? 'Enabled' : 'Disabled'}
+            </span>
+          </p>
+          <p className="text-slate-600 dark:text-slate-400">
+            {siteSettings.applicationsOpen
+              ? 'Visitors can see Join Us links, hero/CTA buttons, and submit new Crew join requests.'
+              : 'All Join-the-Crew buttons, navigation links, footer links, and intake content are hidden from visitors.'}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          disabled={togglingIntake}
+          onClick={handleToggleJoinRequests}
+          aria-pressed={siteSettings.applicationsOpen}
+          className={`px-4 py-2 rounded-lg text-xs font-mono font-semibold inline-flex items-center gap-2 shrink-0 transition-colors disabled:opacity-60 ${
+            siteSettings.applicationsOpen
+              ? 'border border-red-400/50 text-red-600 dark:text-red-400 hover:bg-red-500/10'
+              : 'bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a]'
+          }`}
+        >
+          {togglingIntake ? (
+            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+          ) : siteSettings.applicationsOpen ? (
+            <ToggleRight className="w-4 h-4" aria-hidden="true" />
+          ) : (
+            <ToggleLeft className="w-4 h-4" aria-hidden="true" />
+          )}
+          <span>
+            {togglingIntake
+              ? 'Updating...'
+              : siteSettings.applicationsOpen
+                ? 'Disable Join Requests'
+                : 'Enable Join Requests'}
+          </span>
+        </button>
+      </div>
+
+      {/* Automated Email Call-the-Lead Contact Config Bar */}
+      <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="space-y-1 text-xs">
+          <p className="font-mono font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+            <Phone className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" />
+            <span>Automated Approval / Rejection Email</span>
+          </p>
+          <p className="text-slate-600 dark:text-slate-400">
+            Accepting sends an automated approval email instructing the applicant to{' '}
+            <strong className="text-slate-900 dark:text-white">call Campus Lead ({defaultLeadName})</strong>.
+            Declining sends a polite rejection notification.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <input
+            type="tel"
+            value={leadPhoneInput}
+            onChange={(e) => setLeadPhoneInput(e.target.value)}
+            placeholder="Lead Call Number (e.g. +91 98765 43210)"
+            aria-label="Campus Lead call phone number for approval emails"
+            className="h-9 px-3 w-56 rounded-lg text-xs font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
+          />
+          <button
+            type="button"
+            onClick={handleSaveLeadPhone}
+            disabled={savingPhone || leadPhoneInput.trim() === (siteSettings.leadPhone || '').trim()}
+            className="h-9 px-3 rounded-lg text-xs font-mono font-semibold border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#00EA64] disabled:opacity-50"
+          >
+            {savingPhone ? 'Saving...' : 'Save Lead Number'}
+          </button>
+        </div>
+      </div>
+
       {joinRequests.length === 0 ? (
         <p className="p-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] text-sm text-slate-500">
           No Join Us inquiries submitted yet.
         </p>
       ) : (
         <div className="space-y-3">
-          {joinRequests.map((req) => (
-            <div
-              key={req.id}
-              className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] flex flex-col md:flex-row md:items-center justify-between gap-4"
-            >
-              <div className="space-y-1">
-                <p className="font-mono text-sm font-bold text-slate-900 dark:text-white">
-                  {req.name} · {req.registerNumber}
-                </p>
-                <p className="text-xs text-slate-600 dark:text-slate-400">
-                  {req.department} ({req.year}) · {req.email} · {req.phone}
-                </p>
-                <p className="text-xs text-slate-600 dark:text-slate-300">
-                  Skills: <span className="font-mono">{req.skills}</span>
-                </p>
-                <p className="text-xs font-mono text-slate-500">
-                  Submitted {req.submittedAt} · Status:{' '}
-                  <span
-                    className={
-                      req.status === 'approved'
-                        ? 'text-[#009942] dark:text-[#00EA64] font-semibold'
-                        : req.status === 'pending'
-                          ? 'text-amber-600 dark:text-amber-400 font-semibold'
-                          : 'text-red-500 font-semibold'
-                    }
-                  >
-                    {req.status}
-                  </span>
-                </p>
-              </div>
-              {req.status === 'pending' && (
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => reviewJoinRequest(req.id, 'approved')}
-                    className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#00EA64] text-[#0B0F14] inline-flex items-center gap-1"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Mark Reviewed</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => reviewJoinRequest(req.id, 'rejected')}
-                    className="px-3.5 py-2 rounded-lg text-xs font-medium border border-red-400/50 text-red-600 dark:text-red-400 inline-flex items-center gap-1"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                    <span>Decline</span>
-                  </button>
+          {joinRequests.map((req) => {
+            const isBusy = busyId === req.id;
+            const decisionForDraft: 'approved' | 'rejected' =
+              req.status === 'rejected' ? 'rejected' : 'approved';
+            const mailtoHref = buildJoinRequestMailtoHref(
+              buildEmailPayloadFor(req, decisionForDraft)
+            );
+
+            return (
+              <div
+                key={req.id}
+                className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] space-y-3"
+              >
+                <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <p className="font-mono text-sm font-bold text-slate-900 dark:text-white">
+                      {req.name} · {req.registerNumber}
+                    </p>
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      {req.department} ({req.year}) · {req.email} · {req.phone}
+                    </p>
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      Skills: <span className="font-mono">{req.skills}</span>
+                    </p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-mono text-slate-500 pt-0.5">
+                      <span>Submitted {req.submittedAt}</span>
+                      <span>
+                        Status:{' '}
+                        <span
+                          className={
+                            req.status === 'approved'
+                              ? 'text-[#009942] dark:text-[#00EA64] font-semibold'
+                              : req.status === 'pending'
+                                ? 'text-amber-600 dark:text-amber-400 font-semibold'
+                                : 'text-red-500 font-semibold'
+                          }
+                        >
+                          {req.status}
+                        </span>
+                      </span>
+                      {req.emailNotificationStatus && (
+                        <span
+                          className={`inline-flex items-center gap-1 ${
+                            req.emailNotificationStatus === 'sent'
+                              ? 'text-[#009942] dark:text-[#00EA64]'
+                              : req.emailNotificationStatus === 'queued'
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : 'text-red-500'
+                          }`}
+                        >
+                          {req.emailNotificationStatus === 'sent' ? (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          ) : (
+                            <Clock className="w-3.5 h-3.5" />
+                          )}
+                          {req.emailNotificationStatus === 'sent'
+                            ? 'Automated Mail Sent'
+                            : req.emailNotificationStatus === 'queued'
+                              ? 'Mail Queued'
+                              : 'Mail Delivery Failed'}
+                        </span>
+                      )}
+                    </div>
+                    {req.reviewNote && (
+                      <p className="text-xs text-slate-600 dark:text-slate-300 italic">
+                        Note: &ldquo;{req.reviewNote}&rdquo;
+                      </p>
+                    )}
+                    {req.emailError && req.emailNotificationStatus !== 'sent' && (
+                      <p className="text-[11px] font-mono text-amber-600 dark:text-amber-400">
+                        {req.emailError}
+                      </p>
+                    )}
+                  </div>
+
+                  {req.status === 'pending' ? (
+                    <div className="flex flex-col sm:items-end gap-2 shrink-0 w-full lg:w-auto">
+                      <input
+                        type="text"
+                        value={notesById[req.id] || ''}
+                        onChange={(e) =>
+                          setNotesById((prev) => ({ ...prev, [req.id]: e.target.value }))
+                        }
+                        maxLength={400}
+                        placeholder="Optional message to include in email..."
+                        className="h-9 px-3 w-full sm:w-72 rounded-lg text-xs bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewReq({ req, decision: 'approved' })}
+                          className="px-2.5 py-2 rounded-lg text-xs font-mono border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-[#00EA64] inline-flex items-center gap-1"
+                          title="Preview acceptance email"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Preview</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => handleReview(req, 'approved')}
+                          className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] disabled:opacity-60 inline-flex items-center gap-1.5"
+                        >
+                          {isBusy ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Check className="w-3.5 h-3.5" />
+                          )}
+                          <span>Accept &amp; Send Mail</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => handleReview(req, 'rejected')}
+                          className="px-3.5 py-2 rounded-lg text-xs font-medium border border-red-400/50 text-red-600 dark:text-red-400 hover:bg-red-500/10 disabled:opacity-60 inline-flex items-center gap-1.5"
+                        >
+                          {isBusy ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <X className="w-3.5 h-3.5" />
+                          )}
+                          <span>Reject &amp; Send Mail</span>
+                        </button>
+                        {confirmDeleteReqId === req.id ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => handleDeleteInquiry(req.id)}
+                              className="px-2.5 py-2 rounded-lg text-xs font-mono font-semibold bg-red-600 text-white hover:bg-red-500 disabled:opacity-60"
+                            >
+                              Confirm Delete
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteReqId(null)}
+                              className="px-2.5 py-2 rounded-lg text-xs font-mono border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => setConfirmDeleteReqId(req.id)}
+                            aria-label={`Delete inquiry from ${req.name}`}
+                            title="Delete inquiry"
+                            className="p-2 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-500 hover:text-red-500 hover:border-red-500/40 disabled:opacity-60"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPreviewReq({ req, decision: decisionForDraft })
+                        }
+                        className="px-3 py-1.5 rounded-lg text-xs font-mono border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-[#00EA64] inline-flex items-center gap-1.5"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>View Mail</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => handleResend(req)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-mono border border-[#00EA64]/50 text-[#009942] dark:text-[#00EA64] hover:bg-[#00EA64]/10 disabled:opacity-60 inline-flex items-center gap-1.5"
+                      >
+                        {isBusy ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        )}
+                        <span>Resend Mail</span>
+                      </button>
+                      <a
+                        href={mailtoHref}
+                        className="px-3 py-1.5 rounded-lg text-xs font-mono border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-[#00EA64] inline-flex items-center gap-1.5"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Open Mail App</span>
+                      </a>
+                      {confirmDeleteReqId === req.id ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleDeleteInquiry(req.id)}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-mono font-semibold bg-red-600 text-white hover:bg-red-500 disabled:opacity-60"
+                          >
+                            Confirm Delete
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteReqId(null)}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-mono border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => setConfirmDeleteReqId(req.id)}
+                          aria-label={`Delete inquiry from ${req.name}`}
+                          title="Delete inquiry"
+                          className="p-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-500 hover:text-red-500 hover:border-red-500/40 disabled:opacity-60"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       )}
+
+      {/* Email Preview Modal */}
+      {previewReq && (() => {
+        const payload = buildEmailPayloadFor(previewReq.req, previewReq.decision);
+        const rendered = buildJoinRequestEmail(payload);
+        const mailtoHref = buildJoinRequestMailtoHref(payload);
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Automated Email Preview"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setPreviewReq(null);
+            }}
+          >
+            <div className="w-full max-w-2xl max-h-[85vh] rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] shadow-2xl flex flex-col overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-mono uppercase tracking-wider text-[#009942] dark:text-[#00EA64] font-semibold">
+                    {previewReq.decision === 'approved'
+                      ? 'Acceptance Email Template (Includes Call Campus Lead)'
+                      : 'Rejection Email Template'}
+                  </p>
+                  <h3 className="font-mono text-sm font-bold text-slate-900 dark:text-white truncate">
+                    To: {previewReq.req.email}
+                  </h3>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {previewReq.req.status === 'pending' && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPreviewReq({
+                          req: previewReq.req,
+                          decision: previewReq.decision === 'approved' ? 'rejected' : 'approved',
+                        })
+                      }
+                      className="px-2.5 py-1 rounded-md text-[11px] font-mono border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+                    >
+                      Switch to {previewReq.decision === 'approved' ? 'Rejection' : 'Acceptance'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPreviewReq(null)}
+                    aria-label="Close email preview"
+                    className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-5 overflow-y-auto space-y-3 text-xs">
+                <div className="p-3 rounded-lg bg-slate-50 dark:bg-[#0B0F14] border border-slate-200 dark:border-slate-800 font-mono">
+                  <span className="text-slate-500">Subject: </span>
+                  <span className="text-slate-900 dark:text-white font-semibold">
+                    {rendered.subject}
+                  </span>
+                </div>
+                <pre className="p-4 rounded-lg bg-slate-50 dark:bg-[#0B0F14] border border-slate-200 dark:border-slate-800 font-mono text-xs text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">
+                  {rendered.text}
+                </pre>
+              </div>
+
+              <div className="px-5 py-3.5 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 bg-slate-50/70 dark:bg-[#0B0F14]">
+                <a
+                  href={mailtoHref}
+                  className="px-3.5 py-2 rounded-lg text-xs font-mono border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#00EA64] inline-flex items-center gap-1.5"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open in Email App</span>
+                </a>
+                {previewReq.req.status === 'pending' && (
+                  <button
+                    type="button"
+                    disabled={busyId === previewReq.req.id}
+                    onClick={async () => {
+                      const target = previewReq.req;
+                      const dec = previewReq.decision;
+                      setPreviewReq(null);
+                      await handleReview(target, dec);
+                    }}
+                    className={`px-4 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 ${
+                      previewReq.decision === 'approved'
+                        ? 'bg-[#00EA64] text-[#0B0F14]'
+                        : 'bg-red-600 text-white'
+                    }`}
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>
+                      {previewReq.decision === 'approved'
+                        ? 'Approve & Send Automated Mail'
+                        : 'Reject & Send Automated Mail'}
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </section>
   );
 };
@@ -769,6 +1323,33 @@ export const SiteSettingsPanel: React.FC = () => {
                 publicLeaderboardLimit: Number(e.target.value) || 10,
               })
             }
+            className="w-full h-10 px-3 rounded-lg text-sm font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-mono text-slate-500 dark:text-slate-400 mb-1.5">
+            Campus Lead Name (Approval Emails)
+          </label>
+          <input
+            type="text"
+            value={settingsForm.leadName || ''}
+            onChange={(e) => setSettingsForm({ ...settingsForm, leadName: e.target.value })}
+            placeholder="e.g., Campus Lead"
+            className="w-full h-10 px-3 rounded-lg text-sm bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-mono text-slate-500 dark:text-slate-400 mb-1.5">
+            Campus Lead Call Phone (Approval Emails)
+          </label>
+          <input
+            type="tel"
+            value={settingsForm.leadPhone || ''}
+            onChange={(e) => setSettingsForm({ ...settingsForm, leadPhone: e.target.value })}
+            placeholder="+91 98765 43210"
             className="w-full h-10 px-3 rounded-lg text-sm font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
           />
         </div>

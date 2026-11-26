@@ -26,6 +26,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     needsEmailVerification,
     unverifiedEmail,
     can,
+    siteSettings,
     logout,
     toasts,
     dismissToast,
@@ -46,7 +47,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     { to: '/resources', label: 'Resources' },
     { to: '/team', label: 'Team' },
     { to: '/gallery', label: 'Gallery' },
-    ...(can('canSubmitJoinRequest') ? [{ to: '/join', label: 'Join Us' }] : []),
+    ...(can('canSubmitJoinRequest') && siteSettings.applicationsOpen
+      ? [{ to: '/join', label: 'Join Us' }]
+      : []),
     ...(currentUser && currentRole !== 'outsider'
       ? [{ to: getDashboardPath(currentRole), label: 'Dashboard' }]
       : []),

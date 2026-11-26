@@ -27,7 +27,9 @@ export const EmailDebugPage: React.FC = () => {
     addToast,
   } = useApp();
 
-  const [typeFilter, setTypeFilter] = useState<'all' | 'password_reset' | 'verification'>('all');
+  const [typeFilter, setTypeFilter] = useState<
+    'all' | 'password_reset' | 'verification' | 'join_request_approved' | 'join_request_rejected'
+  >('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'sent' | 'failed'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -210,7 +212,15 @@ export const EmailDebugPage: React.FC = () => {
       <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121821] overflow-hidden">
         <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            {(['all', 'password_reset', 'verification'] as const).map((t) => (
+            {(
+              [
+                'all',
+                'password_reset',
+                'verification',
+                'join_request_approved',
+                'join_request_rejected',
+              ] as const
+            ).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -225,7 +235,11 @@ export const EmailDebugPage: React.FC = () => {
                   ? 'All Types'
                   : t === 'password_reset'
                     ? 'Password Reset'
-                    : 'Verification'}
+                    : t === 'verification'
+                      ? 'Verification'
+                      : t === 'join_request_approved'
+                        ? 'Join Approved'
+                        : 'Join Rejected'}
               </button>
             ))}
 
@@ -307,7 +321,7 @@ export const EmailDebugPage: React.FC = () => {
                       </td>
                       <td className="py-3 px-4 font-mono whitespace-nowrap">
                         <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200">
-                          {log.type === 'password_reset' ? 'password_reset' : 'verification'}
+                          {log.type}
                         </span>
                       </td>
                       <td className="py-3 px-4 font-mono text-slate-900 dark:text-white">

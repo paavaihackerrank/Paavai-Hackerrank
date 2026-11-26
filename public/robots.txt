@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /dashboard/
+Disallow: /admin
+Disallow: /profile
+Disallow: /debug/
+Disallow: /access-denied
+
+Sitemap: https://paavai-hackerrank.netlify.app/sitemap.xml

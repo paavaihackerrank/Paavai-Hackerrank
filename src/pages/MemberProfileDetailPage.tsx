@@ -1,11 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
+  Activity,
   ArrowLeft,
   Award,
+  CalendarCheck,
   Check,
   Code2,
   ExternalLink,
+  FileText,
+  Flame,
   Github,
   Linkedin,
   Share2,
@@ -13,8 +17,10 @@ import {
   Trophy,
   User as UserIcon,
 } from 'lucide-react';
+import { PracticeSummary } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
 import { MemberAvatar } from '../components/MemberAvatar';
+import { DriveDocumentViewer } from '../components/DriveDocumentViewer';
 import { PageSeo, SITE_NAME, toAbsoluteUrl } from '../components/PageSeo';
 
 const normalize = (v?: string) => (v || '').trim().toLowerCase().replace(/^@/, '');
@@ -26,6 +32,7 @@ interface ResolvedPublicMember {
   year: string;
   bio: string;
   photoUrl?: string;
+  documentUrl?: string;
   role: 'lead' | 'crew' | 'member';
   designation: string;
   hackerRankHandle?: string;
@@ -38,6 +45,10 @@ interface ResolvedPublicMember {
   rank?: number;
   score?: number;
   problemsSolved?: number;
+  streak?: number;
+  lastPracticeAt?: string;
+  eventsAttended?: number;
+  recentPractices: PracticeSummary[];
 }
 
 export const MemberProfileDetailPage: React.FC = () => {
@@ -53,6 +64,7 @@ export const MemberProfileDetailPage: React.FC = () => {
   } = useApp();
 
   const [copiedLink, setCopiedLink] = useState(false);
+  const [viewerDoc, setViewerDoc] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
   const totalDsaModules = resources.filter((r) => r.track === 'DSA').length;
   const decodedParam = decodeURIComponent(memberId || '').trim();
   const normalizedParam = normalize(decodedParam);
@@ -60,7 +72,14 @@ export const MemberProfileDetailPage: React.FC = () => {
   const member = useMemo<ResolvedPublicMember | null>(() => {
     if (!decodedParam) return null;
 
-    const sortedLb = [...leaderboard].sort((a, b) => b.score - a.score);
+    const sortedLb = [...leaderboard].sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const solvedDiff = (b.solvedCount ?? b.problemsSolved) - (a.solvedCount ?? a.problemsSolved);
+      if (solvedDiff !== 0) return solvedDiff;
+      const evDiff = (b.eventsAttended ?? 0) - (a.eventsAttended ?? 0);
+      if (evDiff !== 0) return evDiff;
+      return a.name.localeCompare(b.name);
+    });
 
     const matchedTeam = teamMembers.find(
       (tm) =>
@@ -79,6 +98,7 @@ export const MemberProfileDetailPage: React.FC = () => {
         normalize(pp.name) === normalizedParam
     );
 
+    const uidCandidate = matchedProfile?.uid || matchedTeam?.uid || '';
     const nameCandidate = matchedProfile?.name || matchedTeam?.name || '';
     const handleCandidate =
       matchedProfile?.hackerRankHandle || matchedTeam?.hackerRankHandle || '';
@@ -86,6 +106,8 @@ export const MemberProfileDetailPage: React.FC = () => {
     const lbIndex = sortedLb.findIndex(
       (lb) =>
         lb.id === decodedParam ||
+        lb.uid === decodedParam ||
+        (uidCandidate && (lb.uid === uidCandidate || lb.id === uidCandidate)) ||
         (handleCandidate && normalize(lb.hackerRankHandle) === normalize(handleCandidate)) ||
         (nameCandidate && normalize(lb.name) === normalize(nameCandidate)) ||
         normalize(lb.hackerRankHandle) === normalizedParam ||
@@ -111,8 +133,13 @@ export const MemberProfileDetailPage: React.FC = () => {
           ? 'Campus Crew Member'
           : 'Student Community Member');
 
+    const solvedCount = Math.max(
+      matchedProfile?.hackerRankSolvedCount ?? 0,
+      matchedLb?.solvedCount ?? matchedLb?.problemsSolved ?? 0
+    );
+
     return {
-      id: matchedProfile?.uid || matchedTeam?.uid || matchedTeam?.id || matchedLb?.id || decodedParam,
+      id: matchedProfile?.uid || matchedTeam?.uid || matchedTeam?.id || matchedLb?.uid || matchedLb?.id || decodedParam,
       name: matchedProfile?.name || matchedTeam?.name || matchedLb?.name || 'Community Member',
       department:
         matchedProfile?.department || matchedTeam?.department || matchedLb?.department || 'CSE',
@@ -122,6 +149,7 @@ export const MemberProfileDetailPage: React.FC = () => {
         matchedTeam?.bio ||
         `Active ${designation} at ${siteSettings.collegeName} practicing competitive programming and DSA.`,
       photoUrl: matchedProfile?.photoUrl || matchedTeam?.photoUrl || '',
+      documentUrl: matchedProfile?.documentUrl,
       role,
       designation,
       hackerRankHandle: handle,
@@ -138,9 +166,16 @@ export const MemberProfileDetailPage: React.FC = () => {
             : ['Problem Solving'],
       completedDsaCount: matchedProfile?.completedDsaCount,
       completedRoadmapCount: matchedProfile?.completedRoadmapCount,
-      rank: lbIndex >= 0 ? lbIndex + 1 : undefined,
+      rank: lbIndex >= 0 ? lbIndex + 1 : matchedProfile?.rank,
       score: matchedLb?.score,
-      problemsSolved: matchedLb?.problemsSolved,
+      problemsSolved:
+        solvedCount > 0 || matchedProfile?.hackerRankSolvedCount !== undefined || matchedLb !== undefined
+          ? solvedCount
+          : undefined,
+      streak: matchedProfile?.streak,
+      lastPracticeAt: matchedProfile?.lastPracticeAt,
+      eventsAttended: matchedLb?.eventsAttended ?? matchedProfile?.eventsAttended,
+      recentPractices: matchedProfile?.recentPractices ?? [],
     };
   }, [
     decodedParam,
@@ -331,53 +366,115 @@ export const MemberProfileDetailPage: React.FC = () => {
           </p>
         </section>
 
-        <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0F14] space-y-1">
-            <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-              <Trophy className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
-              <span>Campus Rank</span>
-            </p>
-            <p className="font-mono text-xl font-bold text-slate-900 dark:text-white tabular-nums">
-              {member.rank !== undefined ? `#${member.rank}` : 'Active'}
-            </p>
-            {member.score !== undefined && (
-              <p className="text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums">
-                {member.score.toLocaleString()} pts
-              </p>
-            )}
-          </div>
+        {member.role !== 'lead' && member.role !== 'crew' && (
+          <>
+            <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0F14] space-y-1">
+                <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <Trophy className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
+                  <span>Campus Rank</span>
+                </p>
+                <p className="font-mono text-xl font-bold text-slate-900 dark:text-white tabular-nums">
+                  {member.rank !== undefined ? `#${member.rank}` : 'Active'}
+                </p>
+                {member.score !== undefined && (
+                  <p className="text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums">
+                    {member.score.toLocaleString()} pts
+                  </p>
+                )}
+              </div>
 
-          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0F14] space-y-1">
-            <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-              <Code2 className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
-              <span>Problems Solved</span>
-            </p>
-            <p className="font-mono text-xl font-bold text-slate-900 dark:text-white tabular-nums">
-              {member.problemsSolved !== undefined ? member.problemsSolved : '—'}
-            </p>
-            <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
-              Verified HackerRank track
-            </p>
-          </div>
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0F14] space-y-1">
+                <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <Code2 className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
+                  <span>HackerRank Solved</span>
+                </p>
+                <p className="font-mono text-xl font-bold text-slate-900 dark:text-white tabular-nums">
+                  {member.problemsSolved !== undefined ? member.problemsSolved : '—'}
+                </p>
+                <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                  {member.lastPracticeAt
+                    ? `Last active: ${member.lastPracticeAt}`
+                    : 'Live HackerRank practice'}
+                </p>
+              </div>
 
-          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0F14] space-y-1">
-            <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-              <Award className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
-              <span>Roadmap Progress</span>
-            </p>
-            <p className="font-mono text-xl font-bold text-slate-900 dark:text-white tabular-nums">
-              {member.completedRoadmapCount !== undefined
-                ? `${member.completedRoadmapCount} modules`
-                : 'Exploring'}
-            </p>
-            {member.completedDsaCount !== undefined && (
-              <p className="text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums">
-                {member.completedDsaCount}
-                {totalDsaModules > 0 ? ` / ${totalDsaModules}` : ''} DSA completed
-              </p>
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0F14] space-y-1">
+                <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <Award className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
+                  <span>Roadmap Progress</span>
+                </p>
+                <p className="font-mono text-xl font-bold text-slate-900 dark:text-white tabular-nums">
+                  {member.completedRoadmapCount !== undefined
+                    ? `${member.completedRoadmapCount} modules`
+                    : 'Exploring'}
+                </p>
+                {member.completedDsaCount !== undefined && (
+                  <p className="text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums">
+                    {member.completedDsaCount}
+                    {totalDsaModules > 0 ? ` / ${totalDsaModules}` : ''} DSA completed
+                  </p>
+                )}
+              </div>
+
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0F14] space-y-1">
+                <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <Flame className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
+                  <span>Streak &amp; Events</span>
+                </p>
+                <p className="font-mono text-xl font-bold text-slate-900 dark:text-white tabular-nums">
+                  {member.streak !== undefined ? `${member.streak}d streak` : '0d streak'}
+                </p>
+                <p className="text-xs font-mono text-slate-500 dark:text-slate-400 inline-flex items-center gap-1 tabular-nums">
+                  <CalendarCheck className="w-3 h-3 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
+                  <span>{member.eventsAttended ?? 0} verified check-ins</span>
+                </p>
+              </div>
+            </section>
+
+            {member.recentPractices.length > 0 && (
+              <section className="space-y-3">
+                <h2 className="font-mono text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-[#009942] dark:text-[#00EA64]" aria-hidden="true" />
+                  <span>Recent Coding Activity History</span>
+                </h2>
+                <div className="divide-y divide-slate-200 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-[#0B0F14]">
+                  {member.recentPractices.slice(0, 8).map((item, idx) => (
+                    <div
+                      key={`${item.date}-${item.title}-${idx}`}
+                      className="px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                    >
+                      <div className="min-w-0 space-y-0.5">
+                        <p className="font-medium text-slate-900 dark:text-white truncate">
+                          {item.title}
+                        </p>
+                        <p className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                          {item.platform} · {item.date} · +{item.count} completion{item.count === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                      {item.notesUrl && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setViewerDoc({
+                              url: item.notesUrl!,
+                              title: item.title,
+                              subtitle: `${item.platform} · ${item.date}`,
+                            })
+                          }
+                          className="px-2.5 py-1 rounded-md text-[11px] font-mono border border-[#00EA64]/40 bg-[#00EA64]/10 text-[#009942] dark:text-[#00EA64] hover:bg-[#00EA64]/20 inline-flex items-center gap-1 self-start sm:self-center shrink-0 transition-colors"
+                        >
+                          <FileText className="w-3 h-3" aria-hidden="true" />
+                          <span>View Notes</span>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
             )}
-          </div>
-        </section>
+          </>
+        )}
 
         {member.skills.length > 0 && (
           <section className="space-y-3">
@@ -397,8 +494,24 @@ export const MemberProfileDetailPage: React.FC = () => {
           </section>
         )}
 
-        {(member.hackerRankUrl || member.githubUrl || member.linkedinUrl) && (
+        {(member.documentUrl || member.hackerRankUrl || member.githubUrl || member.linkedinUrl) && (
           <section className="pt-4 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-3">
+            {member.documentUrl && (
+              <button
+                type="button"
+                onClick={() =>
+                  setViewerDoc({
+                    url: member.documentUrl!,
+                    title: `${member.name} — Portfolio / Resume`,
+                    subtitle: `${member.designation} · ${member.department}`,
+                  })
+                }
+                className="px-3.5 py-2 rounded-lg text-xs font-mono font-semibold bg-[#00EA64] text-[#0B0F14] hover:bg-[#00d35a] inline-flex items-center gap-1.5 transition-colors"
+              >
+                <FileText className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>View Portfolio / Project Doc</span>
+              </button>
+            )}
             {member.hackerRankUrl && (
               <a
                 href={member.hackerRankUrl}
@@ -438,6 +551,13 @@ export const MemberProfileDetailPage: React.FC = () => {
           </section>
         )}
       </article>
+
+      <DriveDocumentViewer
+        url={viewerDoc?.url ?? null}
+        title={viewerDoc?.title}
+        subtitle={viewerDoc?.subtitle}
+        onClose={() => setViewerDoc(null)}
+      />
     </div>
   );
 };

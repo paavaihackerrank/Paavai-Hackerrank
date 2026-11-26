@@ -199,6 +199,14 @@ export const ROLE_META: Record<
  * ============================================================================
  */
 
+export interface PracticeSummary {
+  title: string;
+  platform: CodingPlatform;
+  date: string;
+  count: number;
+  notesUrl?: string;
+}
+
 export interface UserAccount {
   id: string;
   name: string;
@@ -211,6 +219,7 @@ export interface UserAccount {
   year: string;
   phone: string;
   photoUrl?: string;
+  documentUrl?: string;
   hackerRankHandle: string;
   hackerRankUrl?: string;
   githubUrl?: string;
@@ -229,6 +238,7 @@ export interface PublicProfile {
   year: string;
   bio: string;
   photoUrl?: string;
+  documentUrl?: string;
   skills: string[];
   hackerRankHandle: string;
   hackerRankUrl?: string;
@@ -236,6 +246,12 @@ export interface PublicProfile {
   linkedinUrl?: string;
   completedDsaCount: number;
   completedRoadmapCount: number;
+  hackerRankSolvedCount?: number;
+  streak?: number;
+  lastPracticeAt?: string;
+  recentPractices?: PracticeSummary[];
+  rank?: number;
+  eventsAttended?: number;
   updatedAt?: string;
 }
 
@@ -253,10 +269,34 @@ export interface TeamMember {
   updatedAt?: string;
 }
 
+export interface UnstopSyncedEventDetails {
+  unstopUrl: string;
+  unstopCompetitionId: string;
+  title?: string;
+  description?: string;
+  category?: 'Contest' | 'Workshop' | 'Hackathon' | 'Bootcamp';
+  dateISO?: string;
+  venue?: string;
+  bannerImage?: string;
+  unstopRegistrationsCount: number;
+  unstopViewsCount: number;
+  unstopDeadline?: string;
+  unstopOrganiser?: string;
+  unstopMode?: string;
+  unstopPrize?: string;
+  unstopSyncedAt: string;
+  source: 'unstop_api' | 'unstop_html';
+}
+
+export type EventMode = 'offline' | 'online' | 'hybrid';
+
 export interface CampusEvent {
   id: string;
   title: string;
   category: 'Contest' | 'Workshop' | 'Hackathon' | 'Bootcamp';
+  eventMode?: EventMode;
+  attendanceEnabled?: boolean;
+  meetingUrl?: string;
   dateISO: string;
   venue: string;
   description: string;
@@ -266,6 +306,52 @@ export interface CampusEvent {
   createdByName: string;
   createdByRole: UserRole;
   bannerImage: string;
+  documentUrl?: string;
+  unstopUrl?: string;
+  unstopCompetitionId?: string;
+  unstopRegistrationsCount?: number;
+  unstopViewsCount?: number;
+  unstopDeadline?: string;
+  unstopOrganiser?: string;
+  unstopMode?: string;
+  unstopPrize?: string;
+  unstopSyncedAt?: string;
+}
+
+export function getEffectiveEventMode(ev?: Partial<CampusEvent> | null): EventMode {
+  if (!ev) return 'offline';
+  if (ev.eventMode === 'online' || ev.eventMode === 'offline' || ev.eventMode === 'hybrid') {
+    return ev.eventMode;
+  }
+  const unstopMode = (ev.unstopMode || '').trim().toLowerCase();
+  if (unstopMode) {
+    if (unstopMode.includes('hybrid')) return 'hybrid';
+    if (unstopMode.includes('online') && !unstopMode.includes('offline')) return 'online';
+  }
+  const venue = (ev.venue || '').trim().toLowerCase();
+  if (
+    /^(online|virtual|remote)\b/.test(venue) ||
+    venue.includes('google meet') ||
+    venue.includes('zoom') ||
+    venue.includes('microsoft teams') ||
+    venue.includes('hackerrank online')
+  ) {
+    return 'online';
+  }
+  return 'offline';
+}
+
+export function isOnlineEvent(ev?: Partial<CampusEvent> | null): boolean {
+  return getEffectiveEventMode(ev) === 'online';
+}
+
+export function isQrCheckInRequired(ev?: Partial<CampusEvent> | null): boolean {
+  return !isOnlineEvent(ev);
+}
+
+export function isOnlineAttendanceEnabled(ev?: Partial<CampusEvent> | null): boolean {
+  if (!isOnlineEvent(ev)) return true;
+  return Boolean(ev?.attendanceEnabled);
 }
 
 export interface Announcement {
@@ -280,12 +366,16 @@ export interface Announcement {
 
 export interface LeaderboardEntry {
   id: string;
+  uid?: string;
   name: string;
   registerNumber: string;
   department: string;
   year: string;
   score: number;
   problemsSolved: number;
+  solvedCount?: number;
+  eventsAttended?: number;
+  rank?: number;
   hackerRankHandle: string;
 }
 
@@ -301,6 +391,7 @@ export interface LearningResource {
   problemCount: number;
   summary: string;
   url: string;
+  documentUrl?: string;
   topics: string[];
 }
 
@@ -324,6 +415,32 @@ export interface EventRegistration {
   department: string;
   year: string;
   registeredAt: string;
+  ticketCode?: string;
+  ticketEmailStatus?: 'sent' | 'queued' | 'failed';
+  ticketEmailSentAt?: string;
+}
+
+export function buildAttendeeTicketCode(eventId: string, userId: string): string {
+  const cleanEvent = (eventId || 'EVENT')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toUpperCase()
+    .slice(0, 8) || 'EVENT';
+  const cleanUser = (userId || 'USER')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toUpperCase()
+    .slice(0, 10) || 'USER';
+  return `PASS-${cleanEvent}-${cleanUser}`;
+}
+
+export function buildAttendeeQrPayload(
+  eventId: string,
+  userId: string,
+  ticketCode?: string
+): string {
+  const code = ticketCode && ticketCode.trim().length >= 6
+    ? ticketCode.trim()
+    : buildAttendeeTicketCode(eventId, userId);
+  return `HRCC-PASS|${eventId}|${userId}|${code}`;
 }
 
 export interface EventCheckInCode {
@@ -332,6 +449,8 @@ export interface EventCheckInCode {
   eventTitle: string;
   venue: string;
   isActive: boolean;
+  opensAt?: unknown;
+  closesAt?: unknown;
   createdByUid: string;
   createdByName: string;
   createdAt: string;
@@ -353,6 +472,55 @@ export interface EventCheckIn {
   checkedInAt: string;
 }
 
+export interface UnstopParticipant {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  name: string;
+  email: string;
+  registerNumber?: string;
+  college?: string;
+  teamName?: string;
+  status?: string;
+  phone?: string;
+  matchedUserId?: string;
+  importedAt: string;
+  importedByUid: string;
+  importedByName: string;
+}
+
+export type CertificateAwardType =
+  | 'Participation'
+  | 'Winner'
+  | 'Runner-Up'
+  | 'Top Performer'
+  | 'Crew Recognition';
+
+export const CERTIFICATE_AWARD_TYPES: CertificateAwardType[] = [
+  'Participation',
+  'Winner',
+  'Runner-Up',
+  'Top Performer',
+  'Crew Recognition',
+];
+
+export interface EventCertificate {
+  id: string;
+  certId: string;
+  eventId: string;
+  eventTitle: string;
+  eventDate: string;
+  recipientUid?: string;
+  recipientName: string;
+  registerNumber?: string;
+  department?: string;
+  awardType: CertificateAwardType;
+  awardTitle?: string;
+  issuedAt: string;
+  issuedByUid: string;
+  issuedByName: string;
+}
+
 export interface JoinRequest {
   id: string;
   name: string;
@@ -364,6 +532,12 @@ export interface JoinRequest {
   skills: string;
   submittedAt: string;
   status: ApprovalStatus;
+  reviewedAt?: string;
+  reviewedByUid?: string;
+  reviewNote?: string;
+  emailNotificationStatus?: 'sent' | 'queued' | 'failed';
+  emailSentAt?: string;
+  emailError?: string;
 }
 
 export interface SiteSettings {
@@ -371,6 +545,8 @@ export interface SiteSettings {
   collegeName: string;
   tagline: string;
   contactEmail: string;
+  leadName?: string;
+  leadPhone?: string;
   campusLocation: string;
   applicationsOpen: boolean;
   publicLeaderboardLimit: number;
@@ -385,7 +561,11 @@ export interface FaqItem {
 
 export interface EmailSendAttempt {
   id: string;
-  type: 'verification' | 'password_reset';
+  type:
+    | 'verification'
+    | 'password_reset'
+    | 'join_request_approved'
+    | 'join_request_rejected';
   email: string;
   status: 'sent' | 'failed';
   errorCode?: string;
@@ -419,6 +599,7 @@ export interface CodingActivity {
   date: string;
   count: number;
   title: string;
+  notesUrl?: string;
   createdAt: string;
 }
 
@@ -442,6 +623,8 @@ export const INITIAL_SITE_SETTINGS: SiteSettings = {
   collegeName: 'Paavai Engineering College',
   tagline: 'Code. Compete. Conquer.',
   contactEmail: 'hackerrankcrew@paavai.edu.in',
+  leadName: 'Campus Lead',
+  leadPhone: '',
   campusLocation: 'NH-44, Pachal, Namakkal, Tamil Nadu 637018',
   applicationsOpen: true,
   publicLeaderboardLimit: 10,

@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Trash2, X } from 'lucide-react';
+import { CheckCircle2, ChevronLeft, ChevronRight, Plus, Trash2, X } from 'lucide-react';
 import { CHAPTER_IMAGES, GalleryPhoto } from '../config/rbacAndData';
 import { useApp } from '../context/AppContext';
+import { DRIVE_SHARING_HINT, validateDriveOrHttpsUrl } from '../lib/driveUtils';
 import { SafeImage } from '../components/SafeImage';
 import { PageSeo } from '../components/PageSeo';
 
@@ -17,6 +18,11 @@ export const GalleryPage: React.FC = () => {
   const [caption, setCaption] = useState('');
   const [imageUrl, setImageUrl] = useState(CHAPTER_IMAGES.hackathonArena);
   const [formError, setFormError] = useState('');
+
+  const imageValidation = useMemo(
+    () => validateDriveOrHttpsUrl(imageUrl, { allowEmpty: false, allowRelative: true }),
+    [imageUrl]
+  );
 
   const filtered = useMemo(
     () => gallery.filter((g) => category === 'All' || g.category === category),
@@ -41,7 +47,11 @@ export const GalleryPage: React.FC = () => {
   const handleUploadSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !caption.trim() || !imageUrl.trim()) {
-      setFormError('Please fill in photo title, caption, and image URL.');
+      setFormError('Please fill in photo title, caption, and Google Drive or image URL.');
+      return;
+    }
+    if (!imageValidation.valid) {
+      setFormError(imageValidation.error || 'Enter a valid Google Drive share link or https:// URL.');
       return;
     }
     addGalleryPhoto({
@@ -299,15 +309,41 @@ export const GalleryPage: React.FC = () => {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-mono text-slate-600 dark:text-slate-300 mb-1">
-                  Image URL or Preset Campus Photo
-                </label>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                  <label className="block text-xs font-mono text-slate-600 dark:text-slate-300">
+                    Google Drive Link or Direct Image URL
+                  </label>
+                  {imageUrl.trim() && imageValidation.valid && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-[#00EA64]/15 text-[#009942] dark:text-[#00EA64]">
+                      <CheckCircle2 className="w-3 h-3" aria-hidden="true" />
+                      <span>{imageValidation.isDrive ? 'Drive Image Resolved' : 'Image Ready'}</span>
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   value={imageUrl}
                   onChange={(e) => setImageUrl(e.target.value)}
+                  placeholder="https://drive.google.com/file/d/.../view"
                   className="w-full h-10 px-3 rounded-lg text-sm font-mono bg-slate-50 dark:bg-[#0B0F14] border border-slate-300 dark:border-slate-700"
                 />
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  {imageUrl.trim()
+                    ? imageValidation.valid
+                      ? imageValidation.hint
+                      : imageValidation.error
+                    : DRIVE_SHARING_HINT}
+                </p>
+                {imageUrl.trim() && imageValidation.valid && (
+                  <div className="mt-2 h-28 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-900">
+                    <SafeImage
+                      src={imageUrl.trim()}
+                      alt="Live upload preview"
+                      className="w-full h-full object-cover"
+                      fallbackTitle="Preview"
+                    />
+                  </div>
+                )}
                 <div className="mt-2 flex flex-wrap gap-2">
                   {[
                     ['Hackathon', CHAPTER_IMAGES.hackathonArena],

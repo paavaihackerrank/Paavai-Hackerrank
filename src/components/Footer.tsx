@@ -119,6 +119,14 @@ export const Footer: React.FC = () => {
                   Event Gallery
                 </Link>
               </li>
+              <li>
+                <Link
+                  to="/certificates"
+                  className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors whitespace-nowrap"
+                >
+                  Verify E-Certificate
+                </Link>
+              </li>
             </ul>
           </div>
 
@@ -136,14 +144,16 @@ export const Footer: React.FC = () => {
                   Crew &amp; Leadership
                 </Link>
               </li>
-              <li>
-                <Link
-                  to="/join"
-                  className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors whitespace-nowrap"
-                >
-                  Request to Join
-                </Link>
-              </li>
+              {siteSettings.applicationsOpen && (
+                <li>
+                  <Link
+                    to="/join"
+                    className="hover:text-[#009942] dark:hover:text-[#00EA64] transition-colors whitespace-nowrap"
+                  >
+                    Request to Join
+                  </Link>
+                </li>
+              )}
               <li>
                 <Link
                   to="/contact"
